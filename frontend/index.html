@@ -26,6 +26,8 @@ html, body {
   scroll-snap-type: y mandatory;
   -webkit-overflow-scrolling: touch;
 }
+#deck::-webkit-scrollbar { display: none; }
+
 .card {
   position: relative;
   height: 100dvh;
@@ -40,8 +42,8 @@ html, body {
   background-size: cover;
   background-position: center;
   filter: brightness(0.55) saturate(1.05);
-  transition: opacity .4s ease, transform 1.6s ease;
-  transform: scale(1.06);
+  transition: opacity .5s ease, transform 1.6s ease;
+  transform: scale(1.08);
   opacity: 0;
 }
 .card.ready .poster { opacity: 1; transform: scale(1); }
@@ -49,126 +51,125 @@ html, body {
   position: absolute; inset: 0;
   background:
     radial-gradient(ellipse at 50% 30%, transparent 0%, rgba(0,0,0,.55) 75%, rgba(0,0,0,.85) 100%),
-    linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.05) 35%, rgba(0,0,0,.55) 75%, rgba(0,0,0,.92) 100%);
+    linear-gradient(180deg, rgba(0,0,0,.0) 0%, rgba(0,0,0,.0) 50%, rgba(0,0,0,.55) 80%, rgba(0,0,0,.92) 100%);
   pointer-events: none;
-}
-.card .meta {
-  position: absolute; left: 0; right: 0; top: env(safe-area-inset-top, 0);
-  padding: 22px 22px 0;
-  z-index: 2;
-  pointer-events: none;
-}
-.card .meta .title {
-  font-size: clamp(22px, 5.5vw, 32px);
-  font-weight: 700;
-  letter-spacing: .2px;
-  line-height: 1.05;
-  text-shadow: 0 2px 16px rgba(0,0,0,.65);
-}
-.card .meta .sub {
-  margin-top: 6px;
-  font-size: 12px;
-  opacity: .75;
-  letter-spacing: .8px;
-  text-transform: uppercase;
 }
 
-.card .endings {
+/* TOP — three endings stacked */
+.endings {
   position: absolute;
   left: 0; right: 0;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
-  padding: 0 18px;
-  display: flex; flex-direction: column; gap: 10px;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  padding: 0 14px;
+  display: flex; flex-direction: column; gap: 8px;
   z-index: 3;
 }
 .ending {
   position: relative;
   border-radius: 18px;
-  padding: 16px 16px 14px;
-  background: rgba(20,20,20,.55);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
-  backdrop-filter: blur(14px) saturate(160%);
-  border: 1px solid rgba(255,255,255,.09);
+  padding: 14px 16px;
+  background: rgba(15,15,18,.55);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
+  backdrop-filter: blur(16px) saturate(170%);
+  border: 1px solid rgba(255,255,255,.08);
   cursor: pointer;
-  transition: transform .18s ease, background .18s ease, border-color .18s ease;
-  overflow: hidden;
+  transition: transform .18s ease, background .25s ease, border-color .25s ease;
 }
 .ending:active { transform: scale(.98); }
 .ending.liked {
-  background: linear-gradient(135deg, rgba(255, 64, 129, .35), rgba(120, 40, 200, .25));
+  background: linear-gradient(135deg, rgba(255, 64, 129, .42), rgba(120, 40, 200, .30));
   border-color: rgba(255, 64, 129, .55);
+  box-shadow: 0 6px 32px rgba(255, 64, 129, .25);
 }
 .ending .text {
-  font-size: clamp(17px, 4.6vw, 22px);
-  font-weight: 600;
-  line-height: 1.25;
+  font-size: clamp(18px, 4.8vw, 24px);
+  font-weight: 700;
+  line-height: 1.22;
   letter-spacing: .1px;
-  text-shadow: 0 2px 10px rgba(0,0,0,.5);
+  text-shadow: 0 2px 14px rgba(0,0,0,.6);
 }
 .ending .row {
   margin-top: 8px;
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 8px;
   font-size: 12px;
-  opacity: .85;
 }
 .ending .heart {
-  width: 18px; height: 18px;
-  display: inline-block; vertical-align: -3px;
-  margin-right: 4px;
+  width: 17px; height: 17px;
+  display: inline-block;
   background: currentColor;
   -webkit-mask: var(--heart) center/contain no-repeat;
           mask: var(--heart) center/contain no-repeat;
+  opacity: .85;
 }
+.ending.liked .heart { color: #ff4081; opacity: 1; }
 :root {
   --heart: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 21s-7.5-4.7-9.6-9.4C1 7.7 4 4 7.5 4c2 0 3.7 1 4.5 2.6C12.8 5 14.5 4 16.5 4 20 4 23 7.7 21.6 11.6 19.5 16.3 12 21 12 21z'/></svg>");
 }
 .ending .likes {
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: .3px;
 }
-.ending .model {
-  margin-left: auto;
-  font-size: 10px;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
+.ending .likes-pulse {
+  position: absolute;
+  top: 10px; right: 14px;
+  font-size: 12px;
   opacity: .55;
+  letter-spacing: .8px;
+  text-transform: uppercase;
 }
 .ending.placeholder {
-  background: rgba(20,20,20,.35);
+  background: rgba(20,20,20,.30);
   cursor: default;
   pointer-events: none;
 }
 .ending.placeholder .text { opacity: .55; font-style: italic; font-weight: 500; }
 
-/* Header / footer */
-.brand {
-  position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 14px);
+/* BOTTOM brand chip + movie title */
+.bottom {
+  position: absolute;
   left: 0; right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  padding: 0 16px;
+  z-index: 4;
+  display: flex; flex-direction: column; gap: 8px;
+  align-items: center;
   text-align: center;
-  z-index: 10;
   pointer-events: none;
 }
-.brand .logo {
-  display: inline-block;
-  padding: 6px 14px;
-  border-radius: 999px;
-  background: rgba(0,0,0,.35);
-  -webkit-backdrop-filter: blur(10px);
-          backdrop-filter: blur(10px);
-  border: 1px solid rgba(255,255,255,.08);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 4px;
+.bottom .title {
+  font-size: clamp(14px, 3.2vw, 16px);
+  font-weight: 600;
+  opacity: .82;
+  letter-spacing: .4px;
+  text-shadow: 0 2px 10px rgba(0,0,0,.65);
+  max-width: 90vw;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bottom .sub {
+  font-size: 10px;
+  opacity: .55;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+}
+.bottom .logo {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 5px;
   text-transform: uppercase;
   background-image: linear-gradient(90deg, #ff8a00, #ff007a 35%, #8e2de2 70%, #4a00e0);
   -webkit-background-clip: text;
           background-clip: text;
   -webkit-text-fill-color: transparent;
+  pointer-events: none;
 }
-.brand .logo::before {
-  content: "◆ ";
+.bottom .logo::before {
+  content: "◆";
+  margin-right: 6px;
   -webkit-text-fill-color: #ff007a;
+  font-size: 10px;
 }
 
 .audio-toggle {
@@ -188,15 +189,6 @@ html, body {
 }
 .audio-toggle svg { width: 18px; height: 18px; fill: currentColor; }
 
-#yt-host {
-  position: fixed;
-  top: -10px; left: -10px;
-  width: 1px; height: 1px;
-  opacity: 0.001;
-  pointer-events: none;
-  z-index: -1;
-}
-
 #splash {
   position: fixed; inset: 0;
   z-index: 100;
@@ -209,7 +201,7 @@ html, body {
 }
 #splash.gone { opacity: 0; pointer-events: none; }
 #splash .title {
-  font-size: 64px;
+  font-size: clamp(48px, 14vw, 80px);
   font-weight: 900;
   letter-spacing: 8px;
   background-image: linear-gradient(90deg, #ff8a00, #ff007a 35%, #8e2de2 70%, #4a00e0);
@@ -217,7 +209,7 @@ html, body {
           background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-#splash .tag { margin-top: 12px; opacity: .65; font-size: 14px; letter-spacing: 1.4px; text-transform: uppercase; }
+#splash .tag { margin-top: 12px; opacity: .65; font-size: 13px; letter-spacing: 1.4px; text-transform: uppercase; }
 #splash .cta { margin-top: 36px; font-size: 12px; opacity: .55; letter-spacing: 2px; text-transform: uppercase; animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.85} }
 
@@ -228,22 +220,6 @@ html, body {
 }
 #empty.show { display: flex; }
 #empty p { opacity: .6; max-width: 360px; line-height: 1.5; }
-
-.swipe-hint {
-  position: absolute; left: 50%; transform: translateX(-50%);
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 220px);
-  font-size: 11px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  opacity: .5;
-  z-index: 4;
-  animation: float 2.4s ease-in-out infinite;
-  pointer-events: none;
-}
-@keyframes float {
-  0%,100% { transform: translate(-50%, 0); opacity: .35; }
-  50%     { transform: translate(-50%, 8px); opacity: .65; }
-}
 </style>
 </head>
 <body>
@@ -253,15 +229,12 @@ html, body {
   <div class="cta">Tap to begin</div>
 </div>
 
-<div class="brand"><span class="logo">Rewire</span></div>
-
 <button class="audio-toggle" id="audioBtn" aria-label="Toggle sound">
-  <svg viewBox="0 0 24 24" id="audioIcon"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+  <svg viewBox="0 0 24 24" id="audioIcon"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
 </button>
 
 <div id="deck"></div>
 <div id="empty"><p>Loading the alternate universe…</p></div>
-<div id="yt-host"></div>
 
 <script src="/app.js"></script>
 <script>

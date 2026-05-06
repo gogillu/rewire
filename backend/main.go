@@ -37,6 +37,7 @@ type Movie struct {
 	PosterURL     string   `json:"poster_url"`
 	BackdropURL   string   `json:"backdrop_url,omitempty"`
 	YouTubeID     string   `json:"youtube_id,omitempty"`
+	HasAudio      bool     `json:"has_audio"`
 	Endings       []Ending `json:"endings"`
 }
 
@@ -125,6 +126,7 @@ func main() {
 	mux.HandleFunc("GET /api/movies", srv.handleMovies)
 	mux.HandleFunc("POST /api/like", srv.handleLike)
 	mux.HandleFunc("POST /api/admin/upsert-ending", srv.handleUpsertEnding)
+	mux.Handle("GET /audio/", srv.audioHandler())
 	mux.Handle("/", srv.staticHandler())
 
 	// Wrap with permissive CORS so the frontend can be embedded anywhere.
@@ -323,6 +325,10 @@ func (s *Server) loadMovies(ctx context.Context) ([]Movie, error) {
 			return nil, err
 		}
 		m.Endings = []Ending{}
+		// has_audio is computed from disk; cheap stat call.
+		if info, err := os.Stat(filepath.Join(s.dataDir, "audio", m.ID+".mp3")); err == nil && info.Size() > 50_000 {
+			m.HasAudio = true
+		}
 		idx[m.ID] = len(out)
 		out = append(out, m)
 	}
@@ -424,6 +430,31 @@ func (s *Server) staticHandler() http.Handler {
 			w.Header().Set("Cache-Control", "public, max-age=86400")
 		}
 		fs.ServeHTTP(w, r)
+	})
+}
+
+// audioHandler streams /audio/<movie_id>.mp3 from data/audio/. Range
+// requests are handled by http.ServeFile so the browser can scrub /
+// resume on flaky networks. Cached aggressively in the SW.
+func (s *Server) audioHandler() http.Handler {
+	dir := filepath.Join(s.dataDir, "audio")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// strip "/audio/" prefix; only serve <id>.mp3 files inside data/audio/
+		name := strings.TrimPrefix(r.URL.Path, "/audio/")
+		if name == "" || strings.ContainsAny(name, `/\`) || !strings.HasSuffix(name, ".mp3") {
+			http.NotFound(w, r)
+			return
+		}
+		full := filepath.Join(dir, name)
+		info, err := os.Stat(full)
+		if err != nil || info.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.Header().Set("Cache-Control", "public, max-age=2592000, immutable")
+		w.Header().Set("Accept-Ranges", "bytes")
+		http.ServeFile(w, r, full)
 	})
 }
 

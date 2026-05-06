@@ -11,3 +11,6 @@ __pycache__/
 # Scratch
 *.log
 .vscode/
+
+data/audio/
+

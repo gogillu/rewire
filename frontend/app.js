@@ -1,11 +1,12 @@
-// Rewire frontend — vanilla JS, no framework. Tiny, fast, IndexedDB-cached.
+// Rewire frontend — vanilla JS. Random shuffle on every page load,
+// local /audio/<id>.mp3 playback (loop), persistent like history.
 (function () {
   'use strict';
 
   const $  = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  // ---------- IndexedDB (likes & history) ----------
+  // ---------- IndexedDB ----------
   const DB_NAME = 'rewire';
   const DB_VER  = 1;
   function openDB() {
@@ -42,27 +43,33 @@
       tx.onerror = () => rej(tx.error);
     });
   }
+  async function idbAll(store) {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(store, 'readonly');
+      const r = tx.objectStore(store).getAll();
+      r.onsuccess = () => res(r.result || []);
+      r.onerror = () => rej(r.error);
+    });
+  }
 
   // ---------- State ----------
   const state = {
-    movies: [],
+    movies: [],            // shuffled order
     cardEls: [],
-    likeMap: new Map(),         // movieId -> endingId user picked
+    likeMap: new Map(),    // movieId -> endingId
     audioOn: false,
-    yt: null,                   // YT.Player instance
-    ytReady: false,
+    audio: null,           // single HTMLAudio element shared across cards
     activeIdx: -1,
-    pendingSong: null,          // queued YouTube id while ytReady is false
+    currentSrc: null,
   };
 
   // ---------- API ----------
   async function fetchMovies() {
-    // Use cached payload first if fresh, then refresh in background.
+    // Try cached payload first for instant first paint, then refresh.
     const cached = await idbGet('cache', 'movies');
     if (cached && Date.now() - cached.t < 1000 * 60 * 30) {
-      state.movies = cached.v.movies;
-      render();
-      // Background refresh
+      applyMoviePayload(cached.v);
       refresh().catch(() => {});
       return;
     }
@@ -72,9 +79,37 @@
     const r = await fetch('/api/movies', { cache: 'no-store' });
     if (!r.ok) throw new Error('fetch movies failed');
     const data = await r.json();
-    state.movies = data.movies || [];
     await idbPut('cache', { k: 'movies', v: data, t: Date.now() });
+    applyMoviePayload(data);
+  }
+  function applyMoviePayload(payload) {
+    const arr = (payload.movies || []).slice();
+    // Random shuffle on every page-load — server returns deterministic
+    // sort_order, we randomize per-tab.
+    shuffleInPlace(arr);
+    state.poolSrc = (payload.movies || []).slice();
+    state.movies = arr;
     render();
+    // Pre-warm the next 5 audio clips (and posters) so scrolling is smooth
+    for (let i = 0; i < 5; i++) preload(arr[i]);
+  }
+
+  function appendShuffledBatch() {
+    if (!state.poolSrc || !state.poolSrc.length) return;
+    const batch = state.poolSrc.slice();
+    shuffleInPlace(batch);
+    const offset = state.movies.length;
+    state.movies.push(...batch);
+    const deck = $('#deck');
+    const frag = document.createDocumentFragment();
+    batch.forEach((m, i) => {
+      const card = buildCard(m, offset + i);
+      frag.appendChild(card);
+      state.cardEls.push(card);
+    });
+    deck.appendChild(frag);
+    // Observe the new cards.
+    if (state._io) state.cardEls.slice(offset).forEach(el => state._io.observe(el));
   }
   async function postLike(endingId, delta) {
     try {
@@ -90,13 +125,7 @@
 
   // ---------- Likes ----------
   async function loadLikes() {
-    const all = await new Promise(async (res, rej) => {
-      const db = await openDB();
-      const tx = db.transaction('likes', 'readonly');
-      const r = tx.objectStore('likes').getAll();
-      r.onsuccess = () => res(r.result || []);
-      r.onerror = () => rej(r.error);
-    });
+    const all = await idbAll('likes');
     for (const row of all) state.likeMap.set(row.movieId, row.endingId);
   }
 
@@ -118,7 +147,6 @@
     });
     deck.appendChild(frag);
     setupObserver();
-    // Show first card immediately (poster fade-in).
     requestAnimationFrame(() => state.cardEls[0]?.classList.add('ready'));
   }
 
@@ -138,14 +166,7 @@
     vig.className = 'vignette';
     card.appendChild(vig);
 
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.innerHTML = `
-      <div class="title">${escapeHTML(m.title)}</div>
-      <div class="sub">${m.year || ''} · ★ ${(m.imdb_rating || 0).toFixed(1)} · ${escapeHTML(m.genre || '')}</div>
-    `;
-    card.appendChild(meta);
-
+    // Endings on TOP — three stacked cards. Like history persists.
     const wrap = document.createElement('div');
     wrap.className = 'endings';
     const liked = state.likeMap.get(m.id);
@@ -154,8 +175,7 @@
       const el = document.createElement('div');
       if (!e) {
         el.className = 'ending placeholder';
-        el.innerHTML = `<div class="text">Rewriting reality…</div>
-                        <div class="row"><span class="model">slot ${i + 1}</span></div>`;
+        el.innerHTML = `<div class="text">Rewriting reality…</div>`;
       } else {
         el.className = 'ending';
         if (liked === e.id) el.classList.add('liked');
@@ -163,66 +183,72 @@
         el.innerHTML = `
           <div class="text">${escapeHTML(e.text)}</div>
           <div class="row">
-            <span><i class="heart"></i><span class="likes">${e.likes || 0}</span></span>
-            <span class="model">${escapeHTML(modelLabel(e.model))}</span>
+            <i class="heart"></i><span class="likes">${formatLikes(e.likes || 0)}</span>
           </div>
         `;
-        el.addEventListener('click', () => onLike(m.id, e.id, el, card));
+        el.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          onLike(m.id, e.id, el, card, idx);
+        });
       }
       wrap.appendChild(el);
     });
     card.appendChild(wrap);
 
-    if (idx === 0) {
-      const hint = document.createElement('div');
-      hint.className = 'swipe-hint';
-      hint.textContent = 'Swipe ↑';
-      card.appendChild(hint);
-    }
+    // BOTTOM — movie title + Rewire logo (no longer overlapping content)
+    const bot = document.createElement('div');
+    bot.className = 'bottom';
+    bot.innerHTML = `
+      <div class="title">${escapeHTML(m.title)}</div>
+      <div class="sub">${m.year || ''} · ★ ${(m.imdb_rating || 0).toFixed(1)}</div>
+      <div class="logo">Rewire</div>
+    `;
+    card.appendChild(bot);
     return card;
   }
 
-  function modelLabel(m) {
-    if (!m) return '';
-    if (m.startsWith('gpt')) return 'GPT';
-    if (m.startsWith('claude-opus')) return 'Claude Opus';
-    if (m.startsWith('claude-sonnet')) return 'Claude Sonnet';
-    if (m.startsWith('claude')) return 'Claude';
-    return m;
+  function formatLikes(n) {
+    if (n < 1000) return String(n);
+    if (n < 1_000_000) return (n / 1000).toFixed(n < 10_000 ? 1 : 0) + 'k';
+    return (n / 1_000_000).toFixed(1) + 'M';
   }
 
   // ---------- Like ----------
-  async function onLike(movieId, endingId, el, card) {
+  async function onLike(movieId, endingId, el, card, idx) {
     const prev = state.likeMap.get(movieId);
-    if (prev === endingId) return;       // already liked this one — do nothing
+    if (prev === endingId) {
+      // Tap on already-liked → advance to next without changing the like.
+      advanceTo(idx + 1);
+      return;
+    }
     state.likeMap.set(movieId, endingId);
-    // visual: clear sibling .liked, mark this one
     $$('.ending', card).forEach(x => x.classList.remove('liked'));
     el.classList.add('liked');
     bumpLike(el, +1);
     if (typeof prev === 'number') {
-      // We don't know which sibling element matches `prev` cheaply, but bumpLike
-      // on the previously selected sibling (if any) keeps counts honest.
       const siblings = $$('.ending', card);
       const prevEl = siblings.find(x => Number(x.dataset.endingId) === prev);
       if (prevEl) bumpLike(prevEl, -1);
-      postLike(prev, -1).then(updateLikeCount);
+      postLike(prev, -1);
     }
     await idbPut('likes', { movieId, endingId, ts: Date.now() });
-    postLike(endingId, +1).then(updateLikeCount);
+    postLike(endingId, +1);
+    // Auto-advance to next movie after a small visual delay.
+    setTimeout(() => advanceTo(idx + 1), 380);
   }
   function bumpLike(el, delta) {
     const span = $('.likes', el);
     if (!span) return;
-    const cur = parseInt(span.textContent || '0', 10) || 0;
-    span.textContent = Math.max(0, cur + delta);
+    const cur = parseInt(span.textContent.replace(/[k,M.]/g, ''), 10) || 0;
+    const next = Math.max(0, cur + delta);
+    span.textContent = formatLikes(next);
   }
-  function updateLikeCount(resp) {
-    if (!resp || typeof resp.likes !== 'number') return;
-    // server's authoritative count is reflected on the next /api/movies refresh
+  function advanceTo(i) {
+    const next = state.cardEls[i];
+    if (next) next.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  // ---------- Observer for active card ----------
+  // ---------- Active card observer ----------
   function setupObserver() {
     const io = new IntersectionObserver((entries) => {
       for (const ent of entries) {
@@ -236,70 +262,62 @@
         }
       }
     }, { threshold: [0, 0.6, 1] });
+    state._io = io;
     state.cardEls.forEach(el => io.observe(el));
   }
   function onCardActive(idx) {
     const m = state.movies[idx];
     if (!m) return;
-    // Preload neighbouring posters
-    [idx - 1, idx + 1, idx + 2].forEach(j => {
-      const mm = state.movies[j];
-      if (mm && mm.poster_url) {
-        const im = new Image();
-        im.src = mm.poster_url;
-      }
-    });
-    // Switch theme song
-    if (m.youtube_id) playYouTube(m.youtube_id);
-    else stopYouTube();
+    [idx + 1, idx + 2, idx + 3].forEach(j => preload(state.movies[j]));
+    if (m.has_audio) playAudio(m.id);
+    else stopAudio();
+    // Infinite scroll: when within 6 cards of the end, shuffle + append.
+    if (idx >= state.movies.length - 6) appendShuffledBatch();
+  }
+  function preload(m) {
+    if (!m) return;
+    if (m.poster_url) { const im = new Image(); im.src = m.poster_url; }
+    if (m.has_audio) {
+      // Hint to the SW + browser cache.
+      fetch(`/audio/${m.id}.mp3`, { cache: 'force-cache' }).catch(() => {});
+    }
   }
 
-  // ---------- YouTube IFrame API ----------
-  function ensureYT() {
-    if (window.YT && window.YT.Player) return;
-    const tag = document.createElement('script');
-    tag.src = 'https://www.youtube.com/iframe_api';
-    document.head.appendChild(tag);
+  // ---------- Local audio ----------
+  function ensureAudio() {
+    if (state.audio) return state.audio;
+    const a = new Audio();
+    a.loop = true;
+    a.preload = 'auto';
+    a.volume = state.audioOn ? 0.65 : 0;
+    a.muted = !state.audioOn;
+    state.audio = a;
+    return a;
   }
-  window.onYouTubeIframeAPIReady = function () {
-    state.yt = new YT.Player('yt-host', {
-      height: '1', width: '1',
-      playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, playsinline: 1, rel: 0 },
-      events: {
-        onReady: () => {
-          state.ytReady = true;
-          state.yt.setVolume(state.audioOn ? 60 : 0);
-          if (state.audioOn) state.yt.unMute(); else state.yt.mute();
-          if (state.pendingSong) playYouTube(state.pendingSong);
-        },
-        onStateChange: (e) => {
-          // loop on end
-          if (e.data === YT.PlayerState.ENDED && state.yt) state.yt.playVideo();
-        },
-      },
-    });
-  };
-  function playYouTube(id) {
-    if (!state.ytReady) { state.pendingSong = id; ensureYT(); return; }
-    state.pendingSong = null;
-    try {
-      state.yt.loadVideoById({ videoId: id, startSeconds: 6 });
-      if (state.audioOn) state.yt.unMute(); else state.yt.mute();
-    } catch {}
+  function playAudio(id) {
+    const a = ensureAudio();
+    const src = `/audio/${id}.mp3`;
+    if (state.currentSrc !== src) {
+      state.currentSrc = src;
+      a.src = src;
+    }
+    a.muted = !state.audioOn;
+    a.volume = state.audioOn ? 0.65 : 0;
+    if (state.audioOn) a.play().catch(() => {});
   }
-  function stopYouTube() {
-    if (state.ytReady && state.yt) try { state.yt.stopVideo(); } catch {}
+  function stopAudio() {
+    if (state.audio) { try { state.audio.pause(); } catch {} }
+    state.currentSrc = null;
   }
   function setAudio(on) {
     state.audioOn = on;
     const ic = $('#audioIcon');
     if (on) ic.innerHTML = `<path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>`;
     else ic.innerHTML = `<path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>`;
-    if (state.ytReady && state.yt) {
-      try {
-        if (on) { state.yt.unMute(); state.yt.setVolume(60); state.yt.playVideo(); }
-        else    { state.yt.mute(); }
-      } catch {}
+    if (state.audio) {
+      state.audio.muted = !on;
+      state.audio.volume = on ? 0.65 : 0;
+      if (on) state.audio.play().catch(() => {});
     }
   }
 
@@ -308,11 +326,9 @@
     const sp = $('#splash');
     sp.classList.add('gone');
     setTimeout(() => sp.remove(), 600);
-    ensureYT();
     setAudio(true);
-    // kick first card's audio if loaded
     const m = state.movies[state.activeIdx >= 0 ? state.activeIdx : 0];
-    if (m && m.youtube_id) playYouTube(m.youtube_id);
+    if (m && m.has_audio) playAudio(m.id);
   }
 
   // ---------- Helpers ----------
@@ -322,8 +338,16 @@
     }[c]));
   }
   function generateGradient(seed) {
-    const h = [...seed].reduce((a,c)=>a+c.charCodeAt(0), 0) % 360;
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) & 0xffff;
+    h = h % 360;
     return `linear-gradient(135deg, hsl(${h},60%,18%), hsl(${(h+45)%360},70%,8%) 60%, #000)`;
+  }
+  function shuffleInPlace(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
   }
 
   // ---------- Boot ----------
@@ -337,10 +361,39 @@
     } catch (e) {
       console.error('boot failed', e);
       $('#empty').classList.add('show');
-      $('#empty').querySelector('p').textContent = 'Could not load movies. Pull down to retry.';
+      $('#empty').querySelector('p').textContent = 'Could not load movies. Pull to retry.';
     }
   })();
 
-  // Refresh in the background every 60 s so new endings + like counts stream in.
-  setInterval(() => { refresh().catch(() => {}); }, 60_000);
+  // Stream new endings + like counts every 60 s. Don't reshuffle on refresh
+  // — just merge fresh likes into the existing in-place card list.
+  setInterval(async () => {
+    try {
+      const r = await fetch('/api/movies', { cache: 'no-store' });
+      if (!r.ok) return;
+      const data = await r.json();
+      await idbPut('cache', { k: 'movies', v: data, t: Date.now() });
+      const byId = new Map(data.movies.map(m => [m.id, m]));
+      state.movies.forEach(m => {
+        const fresh = byId.get(m.id);
+        if (!fresh) return;
+        m.endings = fresh.endings;
+        m.has_audio = fresh.has_audio;
+        m.poster_url = m.poster_url || fresh.poster_url;
+      });
+      state.cardEls.forEach(card => {
+        const m = state.movies[Number(card.dataset.idx)];
+        if (!m) return;
+        const liked = state.likeMap.get(m.id);
+        $$('.ending', card).forEach((el, i) => {
+          const e = m.endings[i];
+          if (!e || el.classList.contains('placeholder')) return;
+          const span = $('.likes', el);
+          if (span) span.textContent = formatLikes(e.likes || 0);
+          el.dataset.endingId = e.id;
+          el.classList.toggle('liked', liked === e.id);
+        });
+      });
+    } catch {}
+  }, 60_000);
 })();
