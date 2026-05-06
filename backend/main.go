@@ -59,6 +59,8 @@ type Server struct {
 	cacheAt   time.Time
 
 	geo *geoCache
+
+	premiumSecret []byte
 }
 
 const schemaSQL = `
@@ -116,10 +118,31 @@ func main() {
 	if _, err := db.Exec(abhinavSchema); err != nil {
 		log.Fatalf("rewire: abhinav schema: %v", err)
 	}
+	if _, err := db.Exec(flagSchema); err != nil {
+		log.Fatalf("rewire: flag schema: %v", err)
+	}
+	if _, err := db.Exec(vibeSchema); err != nil {
+		log.Fatalf("rewire: vibe schema: %v", err)
+	}
+	if _, err := db.Exec(premiumSchema); err != nil {
+		log.Fatalf("rewire: premium schema: %v", err)
+	}
+	if _, err := db.Exec(buySchema); err != nil {
+		log.Fatalf("rewire: buy schema: %v", err)
+	}
+	if _, err := db.Exec(issuedTokensSchema); err != nil {
+		log.Fatalf("rewire: issued tokens schema: %v", err)
+	}
 
 	srv := &Server{db: db, frontendDir: *frontDir, dataDir: *dataDir}
 	srv.initGeoCache()
 	srv.migrateAddModeColumn()
+	srv.migrateRichGeo()
+	if secret, err := srv.loadOrCreateSecret(); err != nil {
+		log.Fatalf("rewire: premium secret: %v", err)
+	} else {
+		srv.premiumSecret = secret
+	}
 	if err := srv.seedAbhinavContent(); err != nil {
 		log.Printf("rewire: seed abhinav: %v", err)
 	}
@@ -155,6 +178,43 @@ func main() {
 	mux.HandleFunc("POST /api/sagar/flag-audio", srv.handleSagarFlagAudio)
 	mux.Handle("GET /sagar", srv.handleSagarFrontend())
 	mux.Handle("GET /sagar/", srv.handleSagarFrontend())
+
+	// ---- v1.0.0 frozen archive ----
+	mux.HandleFunc("GET /api/v1.0.0/movies", srv.handleV1FrozenMovies)
+	mux.HandleFunc("POST /api/v1.0.0/like", srv.handleV1FrozenLike)
+	mux.Handle("GET /1.0.0", srv.handleV1FrozenFrontend())
+	mux.Handle("GET /1.0.0/", srv.handleV1FrozenFrontend())
+
+	// ---- v1.1 universal flag endpoint (3 reasons, no unflag) ----
+	mux.HandleFunc("POST /api/flag", srv.handleFlag)
+
+	// ---- premium tier ----
+	mux.HandleFunc("GET /api/premium/verify", srv.handlePremiumVerify)
+	mux.HandleFunc("GET /api/premium/movies", srv.handlePremiumMovies)
+	mux.HandleFunc("GET /api/premium/leaderboard", srv.handlePremiumLeaderboard)
+	mux.HandleFunc("POST /api/premium/like", srv.handlePremiumLike)
+	mux.HandleFunc("GET /api/premium/prefs", srv.handlePremiumPrefsGet)
+	mux.HandleFunc("POST /api/premium/prefs", srv.handlePremiumPrefsSet)
+	mux.Handle("GET /premium", srv.handlePremiumFrontend())
+	mux.Handle("GET /premium/", srv.handlePremiumFrontend())
+
+	// ---- buy / payment ----
+	mux.HandleFunc("POST /api/buy/init", srv.handleBuyInit)
+	mux.HandleFunc("POST /api/buy/submit-utr", srv.handleBuySubmitUTR)
+	mux.HandleFunc("GET /api/buy/status", srv.handleBuyStatus)
+	mux.HandleFunc("POST /api/buy/complete", srv.handleBuyComplete)
+	mux.HandleFunc("POST /api/buy/recover", srv.handleBuyRecover)
+	mux.Handle("GET /buy", srv.handleBuyFrontend())
+	mux.Handle("GET /buy/", srv.handleBuyFrontend())
+
+	// ---- admin payment review ----
+	mux.HandleFunc("GET /api/admin/payments", srv.handleAdminPayments)
+	mux.HandleFunc("POST /api/admin/payments/approve", srv.handleAdminApprove)
+	mux.HandleFunc("POST /api/admin/payments/reject", srv.handleAdminReject)
+
+	// ---- vibe pipeline (admin upsert) ----
+	mux.HandleFunc("POST /api/admin/vibe/upsert", srv.handleAdminVibeUpsert)
+
 	mux.Handle("GET /audio/", srv.audioHandler())
 	mux.Handle("/", srv.staticHandler())
 
@@ -167,6 +227,10 @@ func main() {
 		Handler:           handler,
 		ReadHeaderTimeout: 15 * time.Second,
 	}
+
+	// Background email outbox processor — picks up token-emails and admin
+	// notifications and sends them via god backend's send_email.py.
+	srv.startEmailWorker(context.Background())
 
 	go func() {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -492,7 +556,7 @@ func withCORS(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Rewire-Admin")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Rewire-Admin, X-Premium-Token")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

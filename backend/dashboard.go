@@ -17,7 +17,10 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mode := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("mode")))
-	if mode != "direct" && mode != "abhinav" && mode != "sagar" {
+	switch mode {
+	case "direct", "abhinav", "sagar", "premium", "v1.0.0", "buy":
+		// allowed
+	default:
 		mode = "all"
 	}
 	// modeFilter inserts an AND clause for non-'all' modes; for 'all' it's
@@ -182,6 +185,50 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
         GROUP BY 1 ORDER BY events DESC
     `)
 
+	// Payment funnel — counts of users who reached each step. We treat the
+	// first occurrence per anon_id as that user's "reach". This naturally
+	// computes drop-off between steps.
+	out["payment_funnel"] = queryRows(s.db, `
+        SELECT step, COUNT(DISTINCT anon_id) AS users, COUNT(*) AS events
+        FROM (
+            SELECT anon_id, event_type AS step
+            FROM telemetry_events
+            WHERE event_type IN (
+                'buy_page_open','buy_email_entered','buy_order_created',
+                'buy_upi_app_clicked','buy_paid_clicked','buy_utr_submitted',
+                'buy_status_poll','buy_token_unlocked','buy_recover_open','buy_recover_submit'
+            )
+        )
+        GROUP BY step
+        ORDER BY users DESC
+    `)
+
+	// Pending orders awaiting admin approval.
+	out["pending_orders"] = queryRows(s.db, `
+        SELECT order_id, email, COALESCE(utr,'') AS utr, status, amount_paise,
+               COALESCE(country,'') AS country, COALESCE(city,'') AS city,
+               COALESCE(isp,'') AS isp, created_at, updated_at
+        FROM payment_orders
+        WHERE status = 'utr_submitted'
+        ORDER BY updated_at DESC
+        LIMIT 30
+    `)
+
+	// Issued tokens summary (lifetime premium users so far).
+	out["premium_tokens"] = queryRows(s.db, `
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN revoked_at IS NULL THEN 1 ELSE 0 END) AS active,
+               SUM(CASE WHEN last_seen_at IS NOT NULL THEN 1 ELSE 0 END) AS used
+        FROM premium_tokens
+    `)
+
+	// Email outbox health.
+	out["email_outbox"] = queryRows(s.db, `
+        SELECT status, COUNT(*) AS n
+        FROM email_outbox
+        GROUP BY status
+    `)
+
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -304,6 +351,21 @@ small{font-size:11px;color:var(--muted)}
 .mode-pill{font-size:10px;padding:1px 7px;border-radius:999px;background:#1d1d22;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-left:6px}
 .mode-pill.abhinav{background:linear-gradient(90deg,#ff007a,#ff8a00);color:#fff}
 .mode-pill.sagar{background:linear-gradient(90deg,#0066ff,#00cfff);color:#fff}
+.mode-pill.premium{background:linear-gradient(90deg,#8e2de2,#ff007a);color:#fff}
+.mode-pill.buy{background:linear-gradient(90deg,#16a34a,#86efac);color:#000;font-weight:700}
+.mode-pill.v100{background:#3a3a44;color:#fff}
+.funnel-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1d1d22}
+.funnel-row:last-child{border-bottom:0}
+.funnel-row .step{flex:0 0 220px;font-size:12px;letter-spacing:.5px;color:var(--muted);text-transform:uppercase}
+.funnel-row .num{flex:0 0 60px;text-align:right;font-variant-numeric:tabular-nums;font-weight:800}
+.funnel-row .gauge{flex:1;height:14px;background:#1d1d22;border-radius:999px;overflow:hidden;position:relative}
+.funnel-row .gauge .fill{height:100%;background:linear-gradient(90deg,#16a34a,#86efac);border-radius:999px}
+.funnel-row .drop{flex:0 0 80px;text-align:right;font-size:11px;color:var(--muted)}
+.pending-actions{display:flex;gap:6px}
+.pending-actions button{font-size:11px;padding:5px 10px;border-radius:8px;border:1px solid #2a2a30;background:#1d1d22;color:#fff;cursor:pointer;letter-spacing:.5px;text-transform:uppercase}
+.pending-actions button.approve{background:linear-gradient(90deg,#16a34a,#22c55e);border-color:transparent;font-weight:700}
+.pending-actions button.reject{background:#3a1a1a;color:#ff8a8a;border-color:#5a1a1a}
+.pending-actions button:disabled{opacity:.5;cursor:wait}
 </style>
 </head>
 <body>
@@ -323,8 +385,11 @@ small{font-size:11px;color:var(--muted)}
   <div class="modes" id="modeBar">
     <button data-mode="all" class="active">All</button>
     <button data-mode="direct">Direct (/)</button>
+    <button data-mode="premium">Premium (/premium)</button>
+    <button data-mode="buy">Buy (/buy)</button>
     <button data-mode="abhinav">Abhinav (/abhinav)</button>
     <button data-mode="sagar">Sagar (/sagar)</button>
+    <button data-mode="v1.0.0">v1.0.0 archive</button>
   </div>
 
   <h2>Mode breakdown</h2>
@@ -366,6 +431,14 @@ small{font-size:11px;color:var(--muted)}
   <h2>Audio health</h2>
   <table id="audio"></table>
 
+  <h2>Premium · payment funnel</h2>
+  <div id="funnel" style="background:var(--card);border:1px solid #232328;border-radius:14px;padding:18px"></div>
+
+  <div class="grid" id="premiumKpis" style="margin-top:14px"></div>
+
+  <h2>Pending orders <span class="muted" style="font-size:11px;letter-spacing:1px">(awaiting approval)</span></h2>
+  <table id="pending"></table>
+
   <p class="muted" style="margin-top:30px"><small>Updated <span id="updated">—</span>. Token cleared by deleting the rewire_admin cookie.</small></p>
 </div>
 
@@ -388,7 +461,11 @@ function timeAgo(ms){
   if(s<86400) return Math.round(s/3600)+'h';
   return Math.round(s/86400)+'d';
 }
-function tbl(el, headers, rows){
+function modePill(m){
+  m = String(m||'direct');
+  const cls = {abhinav:'abhinav',sagar:'sagar',premium:'premium',buy:'buy','v1.0.0':'v100'}[m]||'';
+  return '<span class="mode-pill '+cls+'">'+htmlescape(m)+'</span>';
+}
   el.innerHTML = '<thead><tr>'+headers.map(h=>'<th>'+htmlescape(h)+'</th>').join('')+'</tr></thead><tbody>'+
     rows.map(r=>'<tr>'+r.map((c,i)=>'<td'+(typeof c==='number'?' class="num"':'')+'>'+(c==null?'—':c)+'</td>').join('')+'</tr>').join('')+
     '</tbody>';
@@ -452,10 +529,10 @@ async function load(){
 
   // Recent feedback.
   tbl($('#feedback'),
-    ['When','Mode','Kind','Note','Country'],
+    ['When','Mode','Kind','Note','City'],
     (j.recent_feedback||[]).map(f=>[
       '<span class="muted">'+timeAgo(f.ts)+'</span>',
-      '<span class="mode-pill '+((f.mode==='abhinav'||f.mode==='sagar')?f.mode:'')+'">'+htmlescape(f.mode||'direct')+'</span>',
+      modePill(f.mode),
       '<span class="kind-'+htmlescape(f.kind)+'">'+htmlescape(f.kind)+'</span>',
       htmlescape((f.text||'').slice(0,180)) || '<span class="muted">—</span>',
       htmlescape(f.country||'')
@@ -465,7 +542,7 @@ async function load(){
   tbl($('#modeTable'),
     ['Mode','Users','Sessions','Impressions','Likes','Events'],
     (j.mode_breakdown||[]).map(m=>[
-      '<span class="mode-pill '+((m.mode==='abhinav'||m.mode==='sagar')?m.mode:'')+'">'+htmlescape(m.mode)+'</span>',
+      modePill(m.mode),
       fmt(m.users), fmt(m.sessions), fmt(m.impressions), fmt(m.likes), fmt(m.events)
     ]));
 
@@ -491,7 +568,7 @@ async function load(){
     ['Anon','Mode','Last seen','Events','Country','Device','Browser'],
     (j.recent_users||[]).map(u=>[
       '<code>'+htmlescape(u.anon_short)+'</code>',
-      '<span class="mode-pill '+((u.mode==='abhinav'||u.mode==='sagar')?u.mode:'')+'">'+htmlescape(u.mode||'direct')+'</span>',
+      modePill(u.mode),
       timeAgo(u.last_seen), fmt(u.events),
       htmlescape(u.country||''), htmlescape(u.device||''), htmlescape(u.browser||'')
     ]));
@@ -500,6 +577,96 @@ async function load(){
   tbl($('#audio'),
     ['Event','Count'],
     (j.audio_health||[]).map(a=>[ htmlescape(a.event_type), fmt(a.n) ]));
+
+  // Payment funnel.
+  const funnelOrder = [
+    ['buy_page_open','Opened /buy'],
+    ['buy_email_entered','Entered email'],
+    ['buy_order_created','Order created'],
+    ['buy_upi_app_clicked','Tapped UPI'],
+    ['buy_paid_clicked','Marked paid'],
+    ['buy_utr_submitted','Submitted UTR'],
+    ['buy_token_unlocked','Token unlocked'],
+  ];
+  const fmap = {};
+  (j.payment_funnel||[]).forEach(r=>{ fmap[r.step] = +r.users || 0; });
+  const top = fmap['buy_page_open'] || Math.max(1, ...funnelOrder.map(([k])=>fmap[k]||0));
+  let prev = top;
+  $('#funnel').innerHTML = funnelOrder.map(([k,label])=>{
+    const v = fmap[k] || 0;
+    const pct = top ? (v*100/top) : 0;
+    const drop = (prev>0 && v < prev) ? ((prev-v)*100/prev).toFixed(0)+'% drop' : '';
+    prev = v;
+    return '<div class="funnel-row"><div class="step">'+htmlescape(label)+'</div>'+
+      '<div class="num">'+fmt(v)+'</div>'+
+      '<div class="gauge"><div class="fill" style="width:'+pct.toFixed(1)+'%"></div></div>'+
+      '<div class="drop">'+drop+'</div></div>';
+  }).join('');
+
+  // Premium KPIs.
+  const pt = (j.premium_tokens && j.premium_tokens[0]) || {};
+  const eo = j.email_outbox || [];
+  const eoMap = {}; eo.forEach(r => eoMap[r.status] = +r.n||0);
+  $('#premiumKpis').innerHTML = [
+    ['Premium tokens', fmt(pt.total)],
+    ['Active', fmt(pt.active)],
+    ['Used', fmt(pt.used)],
+    ['Email · queued', fmt(eoMap.queued || 0)],
+    ['Email · sent', fmt(eoMap.sent || 0)],
+    ['Email · failed', fmt(eoMap.failed || 0)],
+  ].map(([k,v])=>'<div class="kpi"><div class="v">'+v+'</div><div class="k">'+k+'</div></div>').join('');
+
+  // Pending orders.
+  const po = j.pending_orders || [];
+  if (po.length === 0) {
+    $('#pending').innerHTML = '<thead><tr><th>—</th></tr></thead><tbody><tr><td class="muted">No pending orders.</td></tr></tbody>';
+  } else {
+    const adminTok = (document.cookie.match(/rewire_admin=([^;]+)/)||[])[1] || '';
+    $('#pending').innerHTML = '<thead><tr>'+
+      ['When','Order','Email','UTR','Amount','Geo','Action'].map(h=>'<th>'+h+'</th>').join('')+
+      '</tr></thead><tbody>'+
+      po.map(o=>{
+        const geo = [o.city, o.country, o.isp].filter(Boolean).join(' · ');
+        const amt = ((+o.amount_paise||0)/100).toFixed(2);
+        return '<tr data-order="'+htmlescape(o.order_id)+'">'+
+          '<td><span class="muted">'+timeAgo(o.updated_at)+'</span></td>'+
+          '<td><code>'+htmlescape(String(o.order_id||'').slice(0,12))+'</code></td>'+
+          '<td>'+htmlescape(o.email||'')+'</td>'+
+          '<td><code>'+htmlescape(o.utr||'')+'</code></td>'+
+          '<td class="num">₹'+amt+'</td>'+
+          '<td class="muted">'+htmlescape(geo)+'</td>'+
+          '<td><div class="pending-actions">'+
+            '<button class="approve" data-act="approve">Approve</button>'+
+            '<button class="reject"  data-act="reject">Reject</button>'+
+          '</div></td>'+
+        '</tr>';
+      }).join('')+
+      '</tbody>';
+    $('#pending').addEventListener('click', async e=>{
+      const btn = e.target.closest('button[data-act]'); if (!btn) return;
+      const tr = btn.closest('tr'); const oid = tr.dataset.order;
+      const act = btn.dataset.act;
+      let note = '';
+      if (act === 'reject') {
+        note = prompt('Reason for rejection (will be logged):', '') || '';
+        if (!note) return;
+      }
+      btn.disabled = true; btn.textContent = '…';
+      try {
+        const r = await fetch('/api/admin/payments/'+act, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json', 'X-Rewire-Admin': adminTok },
+          body: JSON.stringify({ order_id: oid, note }),
+        });
+        if (!r.ok) throw new Error('HTTP '+r.status+' — token in cookie? '+(adminTok?'yes':'no'));
+        tr.style.opacity = .35;
+        setTimeout(load, 800);
+      } catch (err) {
+        alert(err.message);
+        btn.disabled = false; btn.textContent = act;
+      }
+    }, { once: true });
+  }
 
   $('#updated').textContent = new Date().toLocaleTimeString();
 }

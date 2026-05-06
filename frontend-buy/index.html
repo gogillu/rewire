@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0f">
+<title>Rewire Premium — ₹9 lifetime</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; min-height: 100%;
+  background:
+    radial-gradient(ellipse at top, rgba(255,0,122,.18), transparent 60%),
+    radial-gradient(ellipse at 30% 90%, rgba(74,0,224,.18), transparent 60%),
+    #0a0a10;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.wrap {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 28px 22px 80px;
+}
+.brand {
+  font-size: 11px; letter-spacing: 5px; text-transform: uppercase;
+  background-image: linear-gradient(90deg, #ff8a00, #ff007a 35%, #8e2de2 70%, #4a00e0);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+  text-align: center;
+  margin-bottom: 14px;
+}
+h1 {
+  font-size: clamp(24px, 6vw, 32px);
+  margin: 0 0 6px;
+  font-weight: 800;
+  text-align: center;
+}
+.tag {
+  text-align: center;
+  font-size: 13px;
+  opacity: .65;
+  letter-spacing: .4px;
+  margin-bottom: 26px;
+}
+.perks {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 18px;
+  padding: 16px 18px;
+  margin-bottom: 24px;
+}
+.perks li {
+  list-style: none;
+  padding: 6px 0;
+  font-size: 14px;
+  display: flex; align-items: center; gap: 10px;
+}
+.perks li::before {
+  content: "✦";
+  color: #ff8a00;
+  font-size: 14px;
+}
+.perks ul { margin: 0; padding: 0; }
+.price {
+  text-align: center;
+  font-size: 14px;
+  letter-spacing: .3px;
+  opacity: .7;
+  margin-bottom: 16px;
+}
+.price b {
+  font-size: 38px;
+  display: block;
+  background-image: linear-gradient(90deg, #ff8a00, #ff007a 50%, #8e2de2);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 900;
+  margin-bottom: 4px;
+}
+.field { margin-bottom: 12px; }
+.field label {
+  display: block; font-size: 12px; opacity: .65;
+  letter-spacing: .4px; text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.field input {
+  width: 100%;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: #fff;
+  font: inherit;
+  font-size: 16px;
+}
+.field input:focus { outline: none; border-color: rgba(255,138,0,.6); }
+.note {
+  font-size: 11px;
+  opacity: .55;
+  margin-top: 6px;
+  letter-spacing: .2px;
+}
+.btn {
+  width: 100%;
+  background: linear-gradient(90deg, #ff007a, #ff8a00);
+  color: #fff;
+  border: 0;
+  padding: 14px 18px;
+  border-radius: 14px;
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: .5px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: transform .15s ease, opacity .2s ease;
+}
+.btn:active { transform: scale(.98); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.secondary {
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.12);
+  color: #fff;
+}
+.step { display: none; }
+.step.active { display: block; }
+.qr {
+  background: #fff;
+  border-radius: 18px;
+  padding: 14px;
+  margin: 12px auto 18px;
+  max-width: 280px;
+  text-align: center;
+}
+.qr img { display: block; margin: 0 auto; max-width: 100%; height: auto; border-radius: 8px; }
+.upi-row {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,.06);
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  margin: 12px 0;
+}
+.upi-row code { flex: 1; word-break: break-all; }
+.upi-row .copy {
+  background: rgba(255,255,255,.1);
+  border: 0;
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.status-pill {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(255,138,0,.18);
+  border: 1px solid rgba(255,138,0,.5);
+  color: #ffb74d;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+}
+.status-pill.ok { background: rgba(76,175,80,.18); border-color: rgba(76,175,80,.5); color: #81c784; }
+.status-pill.bad { background: rgba(244,67,54,.18); border-color: rgba(244,67,54,.5); color: #ef9a9a; }
+.token-box {
+  background: #000;
+  color: #ff8a00;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  margin: 14px 0;
+  border: 1px solid rgba(255,138,0,.4);
+}
+.muted { opacity: .55; font-size: 12px; }
+a { color: #ff8a00; }
+.small-link {
+  text-align: center;
+  font-size: 12px;
+  margin-top: 16px;
+  opacity: .7;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">◆ Rewire</div>
+  <h1>Premium · Lifetime</h1>
+  <div class="tag">Unlock Intense Mode + leaderboard. One-time payment, lasts forever.</div>
+
+  <div class="price">
+    <b>₹9</b>
+    Pay once · Use forever
+  </div>
+
+  <div class="perks">
+    <ul>
+      <li>Intense Mode — pick 3 of 6 vibes (humour, emotional, sad, controversial, happy, impossible)</li>
+      <li>Movies + endings leaderboard</li>
+      <li>More endings per movie (deeper pool, less repetition)</li>
+      <li>Lifetime token mailed to you · works on any device</li>
+    </ul>
+  </div>
+
+  <!-- Step 1: collect email -->
+  <section id="step-email" class="step active">
+    <div class="field">
+      <label for="email">Your email <span style="color:#ff8a00">*</span></label>
+      <input id="email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required>
+      <div class="note">Mandatory — your token is emailed here from <code>admin@gogillu.live</code>. Also used to recover access if you ever lose it.</div>
+    </div>
+    <div class="field">
+      <label for="email2">Confirm email</label>
+      <input id="email2" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required>
+    </div>
+    <button class="btn" id="goPay">Continue to UPI payment →</button>
+    <div class="small-link">
+      Already paid? <a href="#" id="recoverLink">Recover token</a>
+    </div>
+  </section>
+
+  <!-- Step 2: UPI -->
+  <section id="step-pay" class="step">
+    <div style="text-align:center;margin-bottom:8px"><span class="status-pill">Step 2 of 3 · Pay ₹9</span></div>
+    <p style="font-size:14px;line-height:1.45;margin:8px 0">Pay <b>₹9</b> via any UPI app to:</p>
+    <div class="upi-row">
+      <code id="vpa">7000189190@airtel</code>
+      <button class="copy" id="copyVpa">Copy</button>
+    </div>
+    <p class="muted">Payee: Govind Choudhary · Note: Rewire Premium <span id="orderRef"></span></p>
+
+    <a class="btn" id="upiBtn" href="#" target="_blank" rel="noopener">📱 Open UPI app</a>
+    <p class="muted" style="text-align:center;margin-top:14px">On desktop? Scan this QR from your UPI app:</p>
+    <div class="qr">
+      <img src="upi-qr.jpg" alt="UPI QR — 7000189190@airtel">
+    </div>
+    <button class="btn secondary" id="paidBtn">I've paid → enter UTR</button>
+  </section>
+
+  <!-- Step 3: UTR -->
+  <section id="step-utr" class="step">
+    <div style="text-align:center;margin-bottom:8px"><span class="status-pill">Step 3 of 3 · Confirm</span></div>
+    <div class="field">
+      <label for="utr">UTR / transaction reference</label>
+      <input id="utr" type="text" autocomplete="off" placeholder="e.g. 4321987654321" maxlength="30">
+      <div class="note">Your UPI app shows this number after payment. 10–30 letters/digits. We use it to verify your payment.</div>
+    </div>
+    <button class="btn" id="utrSubmit">Submit & wait for approval</button>
+  </section>
+
+  <!-- Step 4: Pending -->
+  <section id="step-pending" class="step">
+    <div style="text-align:center;margin-bottom:8px"><span class="status-pill">Pending verification</span></div>
+    <p>Thanks 🙏 We've received your transaction reference. Approval is usually <b>within a few hours</b>.</p>
+    <p>Once approved, your <b>lifetime token</b> will:</p>
+    <ul style="font-size:14px;line-height:1.5">
+      <li>arrive in your email from <code>admin@gogillu.live</code></li>
+      <li>auto-unlock Premium on this device when you click the email link</li>
+    </ul>
+    <p class="muted">Order ID: <code id="pendingOrder"></code></p>
+    <p class="muted">Disputes? Reply to the admin email or write to <a href="mailto:admin@gogillu.live">admin@gogillu.live</a>.</p>
+    <button class="btn secondary" id="pollBtn">Check status now</button>
+  </section>
+
+  <!-- Step 5: Done -->
+  <section id="step-done" class="step">
+    <div style="text-align:center;margin-bottom:8px"><span class="status-pill ok">Approved ✓</span></div>
+    <p>You're in! 🎉 Your lifetime token is below — we've also emailed it to you.</p>
+    <div class="token-box" id="tokenBox"></div>
+    <button class="btn" id="goPremium">Open Rewire Premium →</button>
+    <p class="muted">Keep this token safe. Anyone with it can use Premium. Lost it? Use recover-by-email later.</p>
+  </section>
+
+  <!-- Recover -->
+  <section id="step-recover" class="step">
+    <div style="text-align:center;margin-bottom:8px"><span class="status-pill">Recover token</span></div>
+    <div class="field">
+      <label for="recEmail">Email used at purchase</label>
+      <input id="recEmail" type="email" inputmode="email" placeholder="you@example.com">
+    </div>
+    <div class="field">
+      <label for="recOrder">Order ID</label>
+      <input id="recOrder" type="text" placeholder="from your original confirmation email">
+    </div>
+    <button class="btn" id="recSubmit">Email me a fresh token</button>
+    <p class="muted">We'll send a new lifetime token to that email and revoke the old one.</p>
+    <div class="small-link"><a href="#" id="backFromRecover">← back</a></div>
+  </section>
+</div>
+<script src="/buy/app.js"></script>
+</body>
+</html>

@@ -14,3 +14,7 @@ __pycache__/
 
 data/audio/
 
+# secrets / keys
+data/premium-secret.bin
+bin/
+*.exe

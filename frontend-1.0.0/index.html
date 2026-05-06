@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#000000">
-<title>Rewire — Alternate endings of Bollywood</title>
-<link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<title>Rewire v1.0.0 — Archived</title>
+<link rel="manifest" href="/1.0.0/manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="/1.0.0/icon.svg">
 <style>
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
@@ -316,130 +316,6 @@ html, body {
 }
 @keyframes tIn { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
-/* Flag button — small icon at top-right of each card */
-.flag-btn {
-  position: absolute;
-  top: calc(env(safe-area-inset-top, 0px) + 14px);
-  right: 56px;
-  width: 32px; height: 32px;
-  border-radius: 50%;
-  background: rgba(0,0,0,.35);
-  border: 1px solid rgba(255,255,255,.08);
-  color: rgba(255,255,255,.55);
-  z-index: 12;
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  -webkit-backdrop-filter: blur(8px);
-          backdrop-filter: blur(8px);
-  transition: opacity .25s ease, color .25s ease;
-}
-.flag-btn:hover { color: rgba(255,255,255,.9); }
-.flag-btn.flagged { color: #ffb74d; }
-.flag-btn svg { width: 14px; height: 14px; fill: currentColor; }
-
-/* Flag-reason modal */
-#flagModal {
-  position: fixed; inset: 0;
-  z-index: 220;
-  display: none; align-items: flex-end; justify-content: center;
-  background: rgba(0,0,0,.6);
-  -webkit-backdrop-filter: blur(8px);
-          backdrop-filter: blur(8px);
-}
-#flagModal.open { display: flex; }
-#flagModal .sheet {
-  width: 100%;
-  max-width: 480px;
-  background: linear-gradient(180deg, #15151a, #0e0e12);
-  border-top-left-radius: 22px;
-  border-top-right-radius: 22px;
-  border: 1px solid rgba(255,255,255,.08);
-  border-bottom: 0;
-  padding: 22px 22px calc(22px + env(safe-area-inset-bottom, 0px));
-  box-shadow: 0 -20px 60px rgba(0,0,0,.6);
-  animation: sheetIn .25s ease both;
-}
-@keyframes sheetIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
-#flagModal h3 { margin: 0 0 4px; font-size: 17px; }
-#flagModal .desc { font-size: 12px; opacity: .55; margin-bottom: 16px; letter-spacing: .4px; }
-#flagModal .opt {
-  display: flex; align-items: center; gap: 10px;
-  padding: 13px 14px;
-  background: rgba(255,255,255,.04);
-  border: 1px solid rgba(255,255,255,.06);
-  border-radius: 14px;
-  font-size: 15px; font-weight: 600;
-  cursor: pointer;
-  color: #fff;
-  margin-bottom: 8px;
-  transition: background .2s ease, transform .15s ease;
-  text-align: left; width: 100%;
-}
-#flagModal .opt:hover { background: rgba(255,255,255,.08); }
-#flagModal .opt:active { transform: scale(.98); }
-#flagModal .opt .emoji { font-size: 18px; }
-#flagCustomWrap { display: none; margin-top: 12px; }
-#flagCustomWrap.open { display: block; }
-#flagCustomWrap textarea {
-  width: 100%;
-  min-height: 60px;
-  resize: vertical;
-  background: rgba(255,255,255,.05);
-  border: 1px solid rgba(255,255,255,.1);
-  border-radius: 12px;
-  padding: 10px 12px;
-  color: #fff;
-  font: inherit;
-  font-size: 14px;
-  box-sizing: border-box;
-}
-#flagCustomWrap .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
-#flagCustomWrap .send {
-  background: linear-gradient(90deg, #ff007a, #ff8a00);
-  color: #fff;
-  border: 0;
-  padding: 8px 18px;
-  border-radius: 999px;
-  font-weight: 700; letter-spacing: .4px;
-  cursor: pointer;
-}
-
-/* Premium nudge banner — slides in after N cards */
-#premiumNudge {
-  position: fixed;
-  left: 50%;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 90px);
-  transform: translate(-50%, 24px);
-  width: min(94vw, 420px);
-  z-index: 90;
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: linear-gradient(135deg, rgba(255,138,0,.95), rgba(255,0,122,.95) 60%, rgba(74,0,224,.95));
-  color: #fff;
-  display: flex; align-items: center; gap: 12px;
-  box-shadow: 0 14px 50px rgba(255,0,122,.35);
-  opacity: 0; pointer-events: none;
-  transition: opacity .35s ease, transform .35s ease;
-}
-#premiumNudge.show { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
-#premiumNudge .body { flex: 1; min-width: 0; }
-#premiumNudge .ttl { font-weight: 800; font-size: 14px; letter-spacing: .2px; }
-#premiumNudge .sub { font-size: 11px; opacity: .9; margin-top: 2px; letter-spacing: .3px; }
-#premiumNudge .cta {
-  background: rgba(0,0,0,.25);
-  color: #fff;
-  border: 1px solid rgba(255,255,255,.5);
-  border-radius: 999px;
-  padding: 8px 14px;
-  font-weight: 800; font-size: 13px; letter-spacing: .4px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-#premiumNudge .x {
-  background: transparent; border: 0; color: rgba(255,255,255,.7);
-  font-size: 16px; line-height: 1; cursor: pointer; padding: 4px 4px 4px 8px;
-}
-
 #splash {
   position: fixed; inset: 0;
   z-index: 100;
@@ -508,35 +384,13 @@ html, body {
 <div id="deck"></div>
 <div id="empty"><p>Loading the alternate universe…</p></div>
 
-<!-- Flag bottom-sheet (3 reasons + custom) -->
-<div id="flagModal" role="dialog" aria-modal="true" aria-label="Report a problem">
-  <div class="sheet">
-    <h3>What's wrong with this one?</h3>
-    <div class="desc">Tap to report — helps us fix it.</div>
-    <button class="opt" data-reason="wrong_audio"><span class="emoji">🎵</span> Wrong song / audio</button>
-    <button class="opt" data-reason="wrong_poster"><span class="emoji">🖼️</span> Wrong poster</button>
-    <button class="opt" data-reason="other"><span class="emoji">✍️</span> Something else</button>
-    <div id="flagCustomWrap">
-      <textarea id="flagCustom" maxlength="1000" placeholder="Tell us more…"></textarea>
-      <div class="row"><button class="send" id="flagSubmit">Send</button></div>
-    </div>
-  </div>
-</div>
-
-<!-- Premium nudge banner -->
-<div id="premiumNudge">
-  <div class="body">
-    <div class="ttl">Unlock Rewire Premium ✨</div>
-    <div class="sub">Intense Mode · Leaderboard · ₹9 lifetime</div>
-  </div>
-  <button class="cta" id="premiumGo">Get</button>
-  <button class="x" id="premiumClose" aria-label="Close">×</button>
-</div>
-
-<script src="/app.js"></script>
+<script src="/1.0.0/app.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  // Archive frontend uses no SW to avoid stealing the / scope.
+  navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => {
+    if ((r.scope || '').endsWith('/1.0.0/')) r.unregister();
+  })).catch(()=>{});
 }
 </script>
 </body>

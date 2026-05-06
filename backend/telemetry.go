@@ -113,10 +113,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if len(b.Events) > 200 {
 		b.Events = b.Events[:200]
 	}
-	mode := strings.ToLower(strings.TrimSpace(b.Mode))
-	if mode != "abhinav" && mode != "sagar" {
-		mode = "direct"
-	}
+	mode := normalizeMode(b.Mode)
 	ip := clientIP(r)
 	ua := r.UserAgent()
 	if len(ua) > 400 {
@@ -202,10 +199,7 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	if len(f.Text) > 2000 {
 		f.Text = f.Text[:2000]
 	}
-	mode := strings.ToLower(strings.TrimSpace(f.Mode))
-	if mode != "abhinav" && mode != "sagar" {
-		mode = "direct"
-	}
+	mode := normalizeMode(f.Mode)
 	ip := clientIP(r)
 	ua := r.UserAgent()
 	if len(ua) > 400 {
@@ -345,15 +339,18 @@ func (s *Server) geoResolverLoop() {
 	}
 }
 
+// resolveBatch — enriched with district/zip/lat/lon/asn/org/mobile/proxy/
+// hosting via ip-api.com's full field set (66846719). Still uses the batch
+// endpoint so we stay within the 45 req/min, 100 IP/req free tier budget.
 func (s *Server) resolveBatch(ips []string) {
 	if len(ips) == 0 {
 		return
 	}
 	body, _ := json.Marshal(toQuery(ips))
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST",
-		"http://ip-api.com/batch?fields=status,country,regionName,city,isp,query", strings.NewReader(string(body)))
+		"http://ip-api.com/batch?fields=66846719", strings.NewReader(string(body)))
 	if err != nil {
 		return
 	}
@@ -367,7 +364,21 @@ func (s *Server) resolveBatch(ips []string) {
 		return
 	}
 	var out []struct {
-		Status, Country, RegionName, City, ISP, Query string
+		Status     string  `json:"status"`
+		Country    string  `json:"country"`
+		RegionName string  `json:"regionName"`
+		City       string  `json:"city"`
+		District   string  `json:"district"`
+		Zip        string  `json:"zip"`
+		Lat        float64 `json:"lat"`
+		Lon        float64 `json:"lon"`
+		ISP        string  `json:"isp"`
+		Org        string  `json:"org"`
+		AS         string  `json:"as"`
+		Mobile     bool    `json:"mobile"`
+		Proxy      bool    `json:"proxy"`
+		Hosting    bool    `json:"hosting"`
+		Query      string  `json:"query"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return
@@ -379,11 +390,18 @@ func (s *Server) resolveBatch(ips []string) {
 	}
 	defer tx.Rollback()
 	stmt, _ := tx.Prepare(`
-        INSERT INTO ip_geo (ip, country, region, city, isp, resolved_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO ip_geo (
+            ip, country, region, city, isp, resolved_at,
+            district, zip, lat, lon, asn, org, is_mobile, is_proxy, is_hosting
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(ip) DO UPDATE SET
             country=excluded.country, region=excluded.region,
-            city=excluded.city, isp=excluded.isp, resolved_at=excluded.resolved_at
+            city=excluded.city, isp=excluded.isp, resolved_at=excluded.resolved_at,
+            district=excluded.district, zip=excluded.zip,
+            lat=excluded.lat, lon=excluded.lon,
+            asn=excluded.asn, org=excluded.org,
+            is_mobile=excluded.is_mobile, is_proxy=excluded.is_proxy,
+            is_hosting=excluded.is_hosting
     `)
 	defer stmt.Close()
 	s.geo.mu.Lock()
@@ -392,7 +410,11 @@ func (s *Server) resolveBatch(ips []string) {
 			continue
 		}
 		s.geo.mem[e.Query] = geoEntry{e.Country, e.RegionName, e.City, e.ISP}
-		_, _ = stmt.Exec(e.Query, e.Country, e.RegionName, e.City, e.ISP, now)
+		_, _ = stmt.Exec(
+			e.Query, e.Country, e.RegionName, e.City, e.ISP, now,
+			e.District, e.Zip, e.Lat, e.Lon, e.AS, e.Org,
+			boolToInt(e.Mobile), boolToInt(e.Proxy), boolToInt(e.Hosting),
+		)
 	}
 	s.geo.mu.Unlock()
 	_ = tx.Commit()

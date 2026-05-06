@@ -8,22 +8,17 @@
 
   // ---------- IndexedDB ----------
   const DB_NAME = 'rewire';
-  const DB_VER  = 2;
+  const DB_VER  = 1;
   function openDB() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, 2);
-      req.onupgradeneeded = (ev) => {
+      const req = indexedDB.open(DB_NAME, DB_VER);
+      req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains('likes')) {
           db.createObjectStore('likes', { keyPath: 'movieId' });
         }
         if (!db.objectStoreNames.contains('cache')) {
           db.createObjectStore('cache', { keyPath: 'k' });
-        }
-        if (!db.objectStoreNames.contains('flags')) {
-          // Key = movieId — one (latest) flag per movie is enough for the
-          // "concerns already shared" toast on re-tap.
-          db.createObjectStore('flags', { keyPath: 'movieId' });
         }
       };
       req.onerror = () => reject(req.error);
@@ -63,15 +58,12 @@
     movies: [],            // shuffled order
     cardEls: [],
     likeMap: new Map(),    // movieId -> endingId
-    flagMap: new Map(),    // movieId -> { reason, customText, ts }
     audioOn: false,
     audio: null,           // single HTMLAudio element shared across cards
     activeIdx: -1,
     currentSrc: null,
     activeStartedAt: 0,    // ms timestamp current card became active
     cardsViewed: 0,        // monotonic count, used to gate feedback widget
-    pendingFlagMovie: null,
-    nudgeDismissedAt: 0,
   };
 
   // ---------- Telemetry ----------
@@ -136,7 +128,7 @@
       os: ENV.os, browser: ENV.browser, device: ENV.device,
       screen_w: window.innerWidth, screen_h: window.innerHeight,
       events: batch,
-      mode: 'direct',
+      mode: 'v1.0.0',
     });
     try {
       if (useBeacon && navigator.sendBeacon) {
@@ -191,7 +183,7 @@
     await refresh();
   }
   async function refresh() {
-    const r = await fetch('/api/movies', { cache: 'no-store' });
+    const r = await fetch('/api/v1.0.0/movies', { cache: 'no-store' });
     if (!r.ok) throw new Error('fetch movies failed');
     const data = await r.json();
     await idbPut('cache', { k: 'movies', v: data, t: Date.now() });
@@ -228,7 +220,7 @@
   }
   async function postLike(endingId, delta) {
     try {
-      const r = await fetch('/api/like', {
+      const r = await fetch('/api/v1.0.0/like', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ending_id: endingId, delta }),
@@ -324,19 +316,6 @@
     brand.className = 'brand';
     brand.innerHTML = `<div class="logo">Rewire</div>`;
     card.appendChild(brand);
-
-    // Flag button (top-right of card, just left of audio toggle).
-    const flag = document.createElement('button');
-    flag.className = 'flag-btn';
-    if (state.flagMap.has(m.id)) flag.classList.add('flagged');
-    flag.setAttribute('aria-label', 'Report a problem');
-    flag.innerHTML = `<svg viewBox="0 0 24 24"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>`;
-    flag.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      onFlagClick(m.id);
-    });
-    card.appendChild(flag);
-
     return card;
   }
 
@@ -417,7 +396,6 @@
     state.activeStartedAt = Date.now();
     state.cardsViewed += 1;
     maybeShowFeedbackHint();
-    maybeShowPremiumNudge();
     const m = state.movies[idx];
     if (!m) return;
     track('card_enter', { movie_id: m.id });
@@ -538,7 +516,7 @@
       await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: SESSION_ID, anon_id: ANON_ID, kind, text, mode: 'direct' }),
+        body: JSON.stringify({ session_id: SESSION_ID, anon_id: ANON_ID, kind, text, mode: 'v1.0.0' }),
         keepalive: true,
       });
     } catch {}
@@ -576,137 +554,10 @@
     });
   }
 
-  // ---------- Flag UX (3 reasons + no unflag) ----------
-  // Tap the flag icon → bottom sheet with 3 buttons. Once a movie has been
-  // flagged we keep the flag in IndexedDB so the next tap shows a toast
-  // "Concerns already shared" instead of opening the modal again.
-  async function loadFlags() {
-    try {
-      const all = await idbAll('flags');
-      for (const f of all) state.flagMap.set(f.movieId, f);
-    } catch {}
-  }
-  async function onFlagClick(movieId) {
-    const existing = state.flagMap.get(movieId);
-    if (existing) {
-      const labels = {
-        wrong_audio: 'wrong song / audio',
-        wrong_poster: 'wrong poster',
-        other: 'feedback',
-      };
-      showToast('Concerns already shared (' + (labels[existing.reason] || 'reported') + ') ✨');
-      return;
-    }
-    state.pendingFlagMovie = movieId;
-    track('flag_open', { movie_id: movieId });
-    $('#flagCustomWrap').classList.remove('open');
-    $('#flagCustom').value = '';
-    $('#flagModal').classList.add('open');
-  }
-  function closeFlag() {
-    $('#flagModal').classList.remove('open');
-    state.pendingFlagMovie = null;
-  }
-  async function submitFlag(reason, customText) {
-    const movieId = state.pendingFlagMovie;
-    if (!movieId) return;
-    closeFlag();
-    track('flag_submit', { movie_id: movieId, extra: { reason, len: (customText||'').length } });
-    const ts = Date.now();
-    state.flagMap.set(movieId, { movieId, reason, customText: customText || '', ts });
-    try {
-      await idbPut('flags', { movieId, reason, customText: customText || '', ts });
-    } catch {}
-    // Mark the visible flag icon as flagged.
-    $$(`.card[data-movie="${cssEscape(movieId)}"] .flag-btn`).forEach(el => el.classList.add('flagged'));
-    try {
-      await fetch('/api/flag', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: SESSION_ID,
-          anon_id: ANON_ID,
-          mode: 'direct',
-          movie_id: movieId,
-          reason,
-          custom_text: customText || '',
-        }),
-        keepalive: true,
-      });
-    } catch {}
-    showToast('Thanks — flag sent ✨');
-  }
-  function setupFlag() {
-    $('#flagModal').addEventListener('click', (e) => {
-      if (e.target.id === 'flagModal') closeFlag();
-    });
-    $$('#flagModal [data-reason]').forEach(b => {
-      b.addEventListener('click', () => {
-        const reason = b.dataset.reason;
-        if (reason === 'other') {
-          $('#flagCustomWrap').classList.add('open');
-          $('#flagCustom').focus();
-          return;
-        }
-        submitFlag(reason, '');
-      });
-    });
-    $('#flagSubmit').addEventListener('click', () => {
-      const txt = $('#flagCustom').value.trim();
-      submitFlag('other', txt);
-    });
-  }
-
-  // ---------- Premium nudge ----------
-  // Free users get a banner inviting them to /buy after they've enjoyed
-  // the app for a while. Dismissible; re-shows after 30 more cards.
-  function maybeShowPremiumNudge() {
-    if (localStorage.getItem('rw_premium_token')) return;  // already paid
-    const NUDGE_FIRST = 12;
-    const NUDGE_REPEAT = 30;
-    const dismissed = +(localStorage.getItem('rw_nudge_dismissed') || 0);
-    const cardsAtDismiss = +(localStorage.getItem('rw_nudge_cards') || 0);
-    const enough = state.cardsViewed >= NUDGE_FIRST &&
-      (!dismissed || state.cardsViewed - cardsAtDismiss >= NUDGE_REPEAT);
-    if (!enough) return;
-    const el = $('#premiumNudge');
-    if (!el || el.classList.contains('show')) return;
-    el.classList.add('show');
-    track('premium_nudge_shown', { extra: { cards: state.cardsViewed } });
-  }
-  function setupPremiumNudge() {
-    $('#premiumGo').addEventListener('click', () => {
-      track('premium_buy_click');
-      window.location.href = '/buy';
-    });
-    $('#premiumClose').addEventListener('click', () => {
-      const el = $('#premiumNudge');
-      el.classList.remove('show');
-      localStorage.setItem('rw_nudge_dismissed', String(Date.now()));
-      localStorage.setItem('rw_nudge_cards', String(state.cardsViewed));
-      track('premium_nudge_dismissed');
-    });
-  }
-
-  function showToast(text) {
-    const t = document.createElement('div');
-    t.className = 'fb-toast';
-    t.textContent = text;
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 2200);
-  }
-  function cssEscape(s) {
-    if (window.CSS && CSS.escape) return CSS.escape(s);
-    return String(s).replace(/([^a-zA-Z0-9_-])/g, '\\$1');
-  }
-
   // ---------- Boot ----------
   $('#splash').addEventListener('click', dismissSplash, { once: true });
   $('#audioBtn').addEventListener('click', () => setAudio(!state.audioOn));
   setupFeedback();
-  setupFlag();
-  setupPremiumNudge();
-  loadFlags();
 
   (async function boot() {
     try {
