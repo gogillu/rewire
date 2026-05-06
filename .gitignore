@@ -4,6 +4,10 @@ data/rewire.db
 data/rewire.db-shm
 data/rewire.db-wal
 
+# Python cache
+__pycache__/
+*.pyc
+
 # Scratch
 *.log
 .vscode/
