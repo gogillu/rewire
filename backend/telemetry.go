@@ -114,7 +114,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		b.Events = b.Events[:200]
 	}
 	mode := strings.ToLower(strings.TrimSpace(b.Mode))
-	if mode != "abhinav" {
+	if mode != "abhinav" && mode != "sagar" {
 		mode = "direct"
 	}
 	ip := clientIP(r)
@@ -203,7 +203,7 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		f.Text = f.Text[:2000]
 	}
 	mode := strings.ToLower(strings.TrimSpace(f.Mode))
-	if mode != "abhinav" {
+	if mode != "abhinav" && mode != "sagar" {
 		mode = "direct"
 	}
 	ip := clientIP(r)

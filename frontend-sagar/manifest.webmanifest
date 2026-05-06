@@ -1,0 +1,14 @@
+{
+  "name": "Rewire · Sagar build",
+  "short_name": "Rewire S",
+  "description": "Sagar's stats build — every movie shows views, likes, conversion. Tap 📊 for the full leaderboard.",
+  "start_url": "/sagar/",
+  "scope": "/sagar/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#001022",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/sagar/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

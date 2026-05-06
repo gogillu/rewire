@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Rewire · Sagar build — stats &amp; leaderboard</title>
+<link rel="manifest" href="/sagar/manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="/sagar/icon.svg">
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  background: #000; color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", "Inter", sans-serif;
+  overflow: hidden;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#deck {
+  height: 100dvh;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+#deck::-webkit-scrollbar { display: none; }
+
+.card {
+  position: relative;
+  height: 100dvh;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  overflow: hidden;
+  isolation: isolate;
+  background: #0b0b0b;
+}
+.card .poster {
+  position: absolute; inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: brightness(0.55) saturate(1.05);
+  transition: opacity .5s ease, transform 1.6s ease;
+  transform: scale(1.08);
+  opacity: 0;
+}
+.card.ready .poster { opacity: 1; transform: scale(1); }
+.card .vignette {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 40%, transparent 0%, rgba(0,0,0,.45) 70%, rgba(0,0,0,.85) 100%),
+    linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.0) 22%, rgba(0,0,0,.0) 48%, rgba(0,0,0,.55) 72%, rgba(0,0,0,.94) 100%);
+  pointer-events: none;
+}
+
+/* TOP — movie title + year/rating + STATS PILL (Sagar build) */
+.top {
+  position: absolute;
+  left: 0; right: 0;
+  top: calc(env(safe-area-inset-top, 0px) + 18px);
+  padding: 0 16px;
+  z-index: 4;
+  display: flex; flex-direction: column; gap: 6px;
+  align-items: center;
+  text-align: center;
+  pointer-events: none;
+}
+.top .title {
+  font-size: clamp(22px, 6vw, 30px);
+  font-weight: 800;
+  letter-spacing: .3px;
+  text-shadow: 0 2px 14px rgba(0,0,0,.8);
+  max-width: 92vw;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.top .sub {
+  font-size: 11px;
+  opacity: .7;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  text-shadow: 0 1px 8px rgba(0,0,0,.7);
+}
+/* Stat pill — the headline thing Sagar asked for. */
+.stats-pill {
+  display: inline-flex; align-items: center; gap: 10px;
+  margin-top: 4px;
+  padding: 6px 14px;
+  background: rgba(0, 207, 255, .12);
+  border: 1px solid rgba(0, 207, 255, .35);
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: .4px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #d8f4ff;
+  text-shadow: 0 1px 6px rgba(0,0,0,.7);
+  -webkit-backdrop-filter: blur(8px);
+          backdrop-filter: blur(8px);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.stats-pill .sep { opacity: .35; }
+.stats-pill .num { color: #fff; }
+.stats-pill .lbl { opacity: .7; font-weight: 500; text-transform: uppercase; letter-spacing: 1px; }
+
+/* BOTTOM — three endings stacked just above brand */
+.endings {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 54px);
+  padding: 0 14px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 3;
+}
+.ending {
+  position: relative;
+  border-radius: 18px;
+  padding: 14px 16px;
+  padding-right: 84px;
+  background: rgba(15,15,18,.55);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
+  backdrop-filter: blur(16px) saturate(170%);
+  border: 1px solid rgba(255,255,255,.08);
+  cursor: pointer;
+  transition: transform .18s ease, background .25s ease, border-color .25s ease;
+  display: flex; align-items: center;
+}
+.ending:active { transform: scale(.98); }
+.ending.liked {
+  background: linear-gradient(135deg, rgba(255, 64, 129, .42), rgba(120, 40, 200, .30));
+  border-color: rgba(255, 64, 129, .55);
+  box-shadow: 0 6px 32px rgba(255, 64, 129, .25);
+}
+.ending .text {
+  flex: 1;
+  font-size: clamp(17px, 4.5vw, 22px);
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: .1px;
+  text-shadow: 0 2px 14px rgba(0,0,0,.6);
+}
+.ending .row {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font-size: 12px;
+  pointer-events: none;
+}
+.ending .heart {
+  width: 22px; height: 22px;
+  display: inline-block;
+  background: currentColor;
+  -webkit-mask: var(--heart) center/contain no-repeat;
+          mask: var(--heart) center/contain no-repeat;
+  opacity: .85;
+}
+.ending.liked .heart { color: #ff4081; opacity: 1; }
+:root {
+  --heart: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 21s-7.5-4.7-9.6-9.4C1 7.7 4 4 7.5 4c2 0 3.7 1 4.5 2.6C12.8 5 14.5 4 16.5 4 20 4 23 7.7 21.6 11.6 19.5 16.3 12 21 12 21z'/></svg>");
+}
+.ending .likes {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: .3px;
+}
+.ending.placeholder {
+  background: rgba(20,20,20,.30);
+  cursor: default;
+  pointer-events: none;
+}
+.ending.placeholder .text { opacity: .55; font-style: italic; font-weight: 500; }
+
+/* BOTTOM brand chip — Rewire logo + tiny "Sagar build" chip */
+.brand {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  z-index: 4;
+  text-align: center;
+  pointer-events: none;
+}
+.brand .logo {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  background-image: linear-gradient(90deg, #ff8a00, #ff007a 35%, #8e2de2 70%, #4a00e0);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.brand .logo::before {
+  content: "◆";
+  margin-right: 6px;
+  -webkit-text-fill-color: #ff007a;
+  font-size: 10px;
+}
+.brand .build {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0066ff, #00cfff);
+  color: #001022;
+  font-weight: 800;
+  vertical-align: middle;
+}
+
+/* Top-right control cluster: sound + flag-audio */
+.ctrl-cluster {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  right: 14px;
+  z-index: 11;
+  display: flex; gap: 8px;
+}
+.ctrl-cluster button {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.45);
+  border: 1px solid rgba(255,255,255,.1);
+  color: #fff;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+}
+.ctrl-cluster button svg { width: 18px; height: 18px; fill: currentColor; }
+.ctrl-cluster .flag-btn { color: rgba(255,255,255,.7); }
+.ctrl-cluster .flag-btn:hover { color: #ff4081; }
+.ctrl-cluster .flag-btn.flagged { background: rgba(255, 64, 129, .25); border-color: rgba(255, 64, 129, .55); color: #ff4081; }
+
+/* Top-left: leaderboard + feedback */
+.lb-btn, .fb-btn {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.45);
+  border: 1px solid rgba(255,255,255,.1);
+  color: rgba(255,255,255,.85);
+  z-index: 11;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+}
+.lb-btn { left: 14px; }
+.lb-btn svg { width: 18px; height: 18px; fill: currentColor; }
+.fb-btn {
+  left: 60px;
+  width: 32px; height: 32px;
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.08);
+  color: rgba(255,255,255,.7);
+  display: none;
+  opacity: 0;
+  transition: opacity .8s ease;
+}
+.fb-btn.shown { display: flex; opacity: .55; }
+.fb-btn:hover { opacity: 1; }
+.fb-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+/* Leaderboard overlay */
+#lbOverlay {
+  position: fixed; inset: 0;
+  z-index: 200;
+  display: none;
+  background: rgba(0,0,0,.92);
+  -webkit-backdrop-filter: blur(20px);
+          backdrop-filter: blur(20px);
+  flex-direction: column;
+}
+#lbOverlay.open { display: flex; }
+#lbOverlay header {
+  padding: 22px 18px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  flex: 0 0 auto;
+}
+#lbOverlay header h2 {
+  margin: 0; font-size: 22px; font-weight: 800;
+  background-image: linear-gradient(90deg, #00cfff, #0066ff);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+#lbOverlay header .desc { font-size: 11px; opacity: .55; margin-top: 4px; letter-spacing: .6px; line-height: 1.5; }
+#lbOverlay header .desc b { color: #00cfff; font-weight: 700; }
+#lbOverlay .sorts { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+#lbOverlay .sorts button {
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.08);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 11px; font-weight: 700;
+  color: rgba(255,255,255,.7);
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+#lbOverlay .sorts button.active {
+  background: linear-gradient(90deg, #0066ff, #00cfff);
+  color: #001022;
+  border-color: transparent;
+}
+#lbOverlay .lb-close {
+  position: absolute; top: 14px; right: 14px;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.08);
+  color: #fff;
+  font-size: 22px; line-height: 1;
+  cursor: pointer;
+}
+#lbList {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px 18px 32px;
+}
+#lbList .lb-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 8px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  cursor: pointer;
+}
+#lbList .lb-row:hover { background: rgba(255,255,255,.03); }
+#lbList .rank {
+  width: 28px; flex: 0 0 28px;
+  font-weight: 900; font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: rgba(255,255,255,.45);
+  text-align: center;
+}
+#lbList .lb-row.top1 .rank { color: #ffd35e; }
+#lbList .lb-row.top2 .rank { color: #c8d6e0; }
+#lbList .lb-row.top3 .rank { color: #c47b3a; }
+#lbList .poster {
+  width: 38px; height: 56px; flex: 0 0 38px;
+  background-size: cover; background-position: center;
+  border-radius: 6px;
+  background-color: #1a1a1f;
+}
+#lbList .meta { flex: 1 1 auto; min-width: 0; }
+#lbList .meta .name {
+  font-weight: 700; font-size: 14px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#lbList .meta .stats {
+  font-size: 11px; opacity: .55;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px; letter-spacing: .3px;
+}
+#lbList .meta .stats b { color: #fff; opacity: 1; font-weight: 700; }
+#lbList .lb-empty { padding: 40px 8px; text-align: center; opacity: .5; font-size: 13px; }
+
+/* Feedback modal */
+#fbModal {
+  position: fixed; inset: 0;
+  z-index: 201;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.65);
+  -webkit-backdrop-filter: blur(8px);
+          backdrop-filter: blur(8px);
+}
+#fbModal.open { display: flex; }
+#fbModal .panel {
+  position: relative;
+  width: min(92vw, 360px);
+  background: linear-gradient(180deg, #15151a, #0e0e12);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 22px;
+  padding: 22px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.6);
+}
+#fbModal h3 { margin: 0 0 4px; font-size: 18px; letter-spacing: .3px; }
+#fbModal .desc { font-size: 12px; opacity: .55; margin-bottom: 16px; letter-spacing: .4px; }
+#fbModal .opts { display: flex; flex-direction: column; gap: 8px; }
+#fbModal .opt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 14px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  font-size: 15px; font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+}
+#fbModal .opt:hover { background: rgba(255,255,255,.08); }
+#fbModal .opt:active { transform: scale(.98); }
+#fbModal .opt .emoji { font-size: 18px; }
+#fbCustomWrap { display: none; margin-top: 12px; }
+#fbCustomWrap.open { display: block; }
+#fbCustomWrap textarea {
+  width: 100%; min-height: 70px; resize: vertical;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #fff; font: inherit; font-size: 14px;
+}
+#fbCustomWrap .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+#fbCustomWrap .send {
+  background: linear-gradient(90deg, #0066ff, #00cfff);
+  color: #001022; border: 0;
+  padding: 8px 18px; border-radius: 999px;
+  font-weight: 800; letter-spacing: .4px; cursor: pointer;
+}
+#fbModal .close-x {
+  position: absolute; top: 12px; right: 14px;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: transparent; border: 0;
+  color: rgba(255,255,255,.6);
+  font-size: 18px; line-height: 1; cursor: pointer;
+}
+
+.toast {
+  position: fixed;
+  bottom: 80px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20,20,24,.92);
+  border: 1px solid rgba(255,255,255,.1);
+  padding: 10px 22px;
+  border-radius: 999px;
+  font-size: 14px; font-weight: 600;
+  color: #fff;
+  z-index: 250;
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  animation: tIn .3s ease both;
+}
+@keyframes tIn { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* Song-source popover (long-press / info-tap on the audio button) */
+#songInfo {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 56px);
+  right: 14px;
+  z-index: 12;
+  background: rgba(20,20,24,.92);
+  border: 1px solid rgba(255,255,255,.1);
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 12px;
+  color: #fff;
+  max-width: 70vw;
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  display: none;
+  letter-spacing: .2px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+#songInfo.shown { display: block; animation: tIn .25s ease both; }
+#songInfo .lbl { font-size: 9px; opacity: .55; text-transform: uppercase; letter-spacing: 1.4px; }
+#songInfo .q { color: #00cfff; font-weight: 700; word-break: break-word; }
+
+#splash {
+  position: fixed; inset: 0;
+  z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column;
+  background: radial-gradient(ellipse at center, #001a33, #000);
+  text-align: center;
+  cursor: pointer;
+  transition: opacity .5s ease;
+}
+#splash.gone { opacity: 0; pointer-events: none; }
+#splash .title {
+  font-size: clamp(48px, 14vw, 80px);
+  font-weight: 900;
+  letter-spacing: 8px;
+  background-image: linear-gradient(90deg, #00cfff, #0066ff 50%, #8e2de2);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+#splash .tag { margin-top: 12px; opacity: .65; font-size: 13px; letter-spacing: 1.4px; text-transform: uppercase; }
+#splash .build-chip {
+  display: inline-block;
+  margin-top: 14px;
+  font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase;
+  padding: 4px 14px; border-radius: 999px;
+  background: linear-gradient(90deg, #0066ff, #00cfff);
+  color: #001022; font-weight: 800;
+}
+#splash .cta { margin-top: 28px; font-size: 12px; opacity: .55; letter-spacing: 2px; text-transform: uppercase; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.85} }
+
+#empty {
+  position: fixed; inset: 0;
+  display: none; align-items: center; justify-content: center;
+  z-index: 50; text-align: center; padding: 24px;
+}
+#empty.show { display: flex; }
+#empty p { opacity: .6; max-width: 360px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div id="splash">
+  <div class="title">REWIRE</div>
+  <div class="tag">Alternate Endings · Bollywood</div>
+  <div class="build-chip">Sagar Build · Stats</div>
+  <div class="cta">Tap to begin</div>
+</div>
+
+<div class="ctrl-cluster">
+  <button class="flag-btn" id="flagBtn" aria-label="Wrong song" title="Wrong music? Tap to flag.">
+    <svg viewBox="0 0 24 24"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z" fill="currentColor"/><path d="M2 22 22 2" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+  </button>
+  <button class="audio-toggle" id="audioBtn" aria-label="Toggle sound">
+    <svg viewBox="0 0 24 24" id="audioIcon"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+  </button>
+</div>
+
+<button class="lb-btn" id="lbBtn" aria-label="Leaderboard" title="Leaderboard — every movie ranked">
+  <svg viewBox="0 0 24 24"><path d="M5 21h4V11H5v10zm5 0h4V3h-4v18zm5 0h4v-7h-4v7z" fill="currentColor"/></svg>
+</button>
+
+<button class="fb-btn" id="fbBtn" aria-label="Send feedback" title="Tell us what you think">
+  <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-9 12H7v-2h4v2zm6-4H7V8h10v2z"/></svg>
+</button>
+
+<div id="songInfo">
+  <div class="lbl">Song search query</div>
+  <div class="q" id="songQuery">—</div>
+</div>
+
+<div id="lbOverlay" role="dialog" aria-modal="true" aria-label="Leaderboard">
+  <button class="lb-close" id="lbClose" aria-label="Close">×</button>
+  <header>
+    <h2>Leaderboard</h2>
+    <div class="desc">
+      Ranks every movie users have actually engaged with.<br>
+      <b>Likes</b> — total ❤️ across all 3 endings (DB).
+      <b>Views</b> — unique people who saw the card.
+      <b>⚡</b> — likes ÷ views (conversion).
+    </div>
+    <div class="sorts" id="lbSorts">
+      <button data-sort="likes" class="active">Sort: Likes</button>
+      <button data-sort="views">Sort: Views</button>
+      <button data-sort="conversion">Sort: ⚡ Conversion</button>
+    </div>
+  </header>
+  <div id="lbList"><div class="lb-empty">Loading…</div></div>
+</div>
+
+<div id="fbModal" role="dialog" aria-modal="true" aria-label="Feedback">
+  <div class="panel">
+    <button class="close-x" id="fbClose" aria-label="Close">×</button>
+    <h3>How's Rewire?</h3>
+    <div class="desc">One tap. Helps us tune the experience.</div>
+    <div class="opts">
+      <button class="opt" data-kind="interesting"><span class="emoji">🤩</span> Interesting</button>
+      <button class="opt" data-kind="stupid"><span class="emoji">🙄</span> Stupid app</button>
+      <button class="opt" data-kind="custom"><span class="emoji">✍️</span> Tell us yourself</button>
+    </div>
+    <div id="fbCustomWrap">
+      <textarea id="fbCustom" maxlength="2000" placeholder="What's on your mind…"></textarea>
+      <div class="row"><button class="send" id="fbSubmit">Send</button></div>
+    </div>
+  </div>
+</div>
+
+<div id="deck"></div>
+<div id="empty"><p>Loading the alternate universe…</p></div>
+
+<script src="/sagar/app.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sagar/sw.js', { scope: '/sagar/' }).catch(()=>{});
+}
+</script>
+</body>
+</html>

@@ -17,7 +17,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mode := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("mode")))
-	if mode != "direct" && mode != "abhinav" {
+	if mode != "direct" && mode != "abhinav" && mode != "sagar" {
 		mode = "all"
 	}
 	// modeFilter inserts an AND clause for non-'all' modes; for 'all' it's
@@ -300,8 +300,10 @@ small{font-size:11px;color:var(--muted)}
 }
 .modes button.active{background:linear-gradient(90deg,#ff007a,#ff8a00);color:#fff;border-color:transparent}
 .kind-abhinav{color:#ffd35e}
+.kind-sagar{color:#4ad6ff}
 .mode-pill{font-size:10px;padding:1px 7px;border-radius:999px;background:#1d1d22;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-left:6px}
 .mode-pill.abhinav{background:linear-gradient(90deg,#ff007a,#ff8a00);color:#fff}
+.mode-pill.sagar{background:linear-gradient(90deg,#0066ff,#00cfff);color:#fff}
 </style>
 </head>
 <body>
@@ -322,6 +324,7 @@ small{font-size:11px;color:var(--muted)}
     <button data-mode="all" class="active">All</button>
     <button data-mode="direct">Direct (/)</button>
     <button data-mode="abhinav">Abhinav (/abhinav)</button>
+    <button data-mode="sagar">Sagar (/sagar)</button>
   </div>
 
   <h2>Mode breakdown</h2>
@@ -452,7 +455,7 @@ async function load(){
     ['When','Mode','Kind','Note','Country'],
     (j.recent_feedback||[]).map(f=>[
       '<span class="muted">'+timeAgo(f.ts)+'</span>',
-      '<span class="mode-pill '+(f.mode==='abhinav'?'abhinav':'')+'">'+htmlescape(f.mode||'direct')+'</span>',
+      '<span class="mode-pill '+((f.mode==='abhinav'||f.mode==='sagar')?f.mode:'')+'">'+htmlescape(f.mode||'direct')+'</span>',
       '<span class="kind-'+htmlescape(f.kind)+'">'+htmlescape(f.kind)+'</span>',
       htmlescape((f.text||'').slice(0,180)) || '<span class="muted">—</span>',
       htmlescape(f.country||'')
@@ -462,7 +465,7 @@ async function load(){
   tbl($('#modeTable'),
     ['Mode','Users','Sessions','Impressions','Likes','Events'],
     (j.mode_breakdown||[]).map(m=>[
-      '<span class="mode-pill '+(m.mode==='abhinav'?'abhinav':'')+'">'+htmlescape(m.mode)+'</span>',
+      '<span class="mode-pill '+((m.mode==='abhinav'||m.mode==='sagar')?m.mode:'')+'">'+htmlescape(m.mode)+'</span>',
       fmt(m.users), fmt(m.sessions), fmt(m.impressions), fmt(m.likes), fmt(m.events)
     ]));
 
@@ -488,7 +491,7 @@ async function load(){
     ['Anon','Mode','Last seen','Events','Country','Device','Browser'],
     (j.recent_users||[]).map(u=>[
       '<code>'+htmlescape(u.anon_short)+'</code>',
-      '<span class="mode-pill '+(u.mode==='abhinav'?'abhinav':'')+'">'+htmlescape(u.mode||'direct')+'</span>',
+      '<span class="mode-pill '+((u.mode==='abhinav'||u.mode==='sagar')?u.mode:'')+'">'+htmlescape(u.mode||'direct')+'</span>',
       timeAgo(u.last_seen), fmt(u.events),
       htmlescape(u.country||''), htmlescape(u.device||''), htmlescape(u.browser||'')
     ]));

@@ -150,6 +150,11 @@ func main() {
 	mux.HandleFunc("POST /api/abhinav/rate-ending", srv.handleAbhinavRateEnding)
 	mux.Handle("GET /abhinav", srv.handleAbhinavFrontend())
 	mux.Handle("GET /abhinav/", srv.handleAbhinavFrontend())
+	mux.HandleFunc("GET /api/sagar/movies", srv.handleSagarMovies)
+	mux.HandleFunc("GET /api/sagar/leaderboard", srv.handleSagarLeaderboard)
+	mux.HandleFunc("POST /api/sagar/flag-audio", srv.handleSagarFlagAudio)
+	mux.Handle("GET /sagar", srv.handleSagarFrontend())
+	mux.Handle("GET /sagar/", srv.handleSagarFrontend())
 	mux.Handle("GET /audio/", srv.audioHandler())
 	mux.Handle("/", srv.staticHandler())
 
