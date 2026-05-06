@@ -399,7 +399,7 @@
     if (!m) return;
     track('card_enter', { movie_id: m.id });
     [idx + 1, idx + 2, idx + 3].forEach(j => preload(state.movies[j]));
-    if (m.has_audio) playAudio(m.id);
+    if (m.has_audio) playAudio(m.id, m.audio_version);
     else stopAudio();
     // Infinite scroll: when within 6 cards of the end, shuffle + append.
     if (idx >= state.movies.length - 6) appendShuffledBatch();
@@ -408,9 +408,15 @@
     if (!m) return;
     if (m.poster_url) { const im = new Image(); im.src = m.poster_url; }
     if (m.has_audio) {
-      // Hint to the SW + browser cache.
-      fetch(`/audio/${m.id}.mp3`, { cache: 'force-cache' }).catch(() => {});
+      // Hint to the SW + browser cache. Version-bust ensures re-encoded
+      // tracks don't get served from a stale cache entry.
+      fetch(audioUrl(m.id, m.audio_version), { cache: 'force-cache' }).catch(() => {});
     }
+  }
+
+  function audioUrl(id, version) {
+    const v = (typeof version === 'number' && version > 0) ? `?v=${version}` : '';
+    return `/audio/${id}.mp3${v}`;
   }
 
   // ---------- Local audio ----------
@@ -424,9 +430,9 @@
     state.audio = a;
     return a;
   }
-  function playAudio(id) {
+  function playAudio(id, version) {
     const a = ensureAudio();
-    const src = `/audio/${id}.mp3`;
+    const src = audioUrl(id, version);
     if (state.currentSrc !== src) {
       state.currentSrc = src;
       a.src = src;
@@ -459,7 +465,7 @@
     setTimeout(() => sp.remove(), 600);
     setAudio(true);
     const m = state.movies[state.activeIdx >= 0 ? state.activeIdx : 0];
-    if (m && m.has_audio) playAudio(m.id);
+    if (m && m.has_audio) playAudio(m.id, m.audio_version);
   }
 
   // ---------- Helpers ----------
@@ -577,6 +583,7 @@
         if (!fresh) return;
         m.endings = fresh.endings;
         m.has_audio = fresh.has_audio;
+        m.audio_version = fresh.audio_version;
         m.poster_url = m.poster_url || fresh.poster_url;
       });
       state.cardEls.forEach(card => {

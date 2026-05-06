@@ -38,6 +38,7 @@ type Movie struct {
 	BackdropURL   string   `json:"backdrop_url,omitempty"`
 	YouTubeID     string   `json:"youtube_id,omitempty"`
 	HasAudio      bool     `json:"has_audio"`
+	AudioVersion  int64    `json:"audio_version,omitempty"`
 	Endings       []Ending `json:"endings"`
 }
 
@@ -351,6 +352,7 @@ func (s *Server) loadMovies(ctx context.Context) ([]Movie, error) {
 		// has_audio is computed from disk; cheap stat call.
 		if info, err := os.Stat(filepath.Join(s.dataDir, "audio", m.ID+".mp3")); err == nil && info.Size() > 50_000 {
 			m.HasAudio = true
+			m.AudioVersion = info.ModTime().Unix()
 		}
 		idx[m.ID] = len(out)
 		out = append(out, m)

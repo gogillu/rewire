@@ -279,6 +279,7 @@ type abhinavContent struct {
 	ActualEnding string         `json:"actual_ending"`
 	PosterURL    string         `json:"poster_url"`
 	HasAudio     bool           `json:"has_audio"`
+	AudioVersion int64          `json:"audio_version,omitempty"`
 	Endings      []abhinavEnding `json:"endings"`
 }
 
@@ -323,6 +324,7 @@ func (s *Server) handleAbhinavMovies(w http.ResponseWriter, r *http.Request) {
 		c.Endings = []abhinavEnding{}
 		if info, err := os.Stat(filepath.Join(s.dataDir, "audio", c.ID+".mp3")); err == nil && info.Size() > 50_000 {
 			c.HasAudio = true
+			c.AudioVersion = info.ModTime().Unix()
 		}
 		idx[c.ID] = len(out)
 		out = append(out, c)
