@@ -96,12 +96,14 @@ html, body {
   position: relative;
   border-radius: 18px;
   padding: 14px 16px;
+  padding-right: 84px;
   background: rgba(15,15,18,.55);
   -webkit-backdrop-filter: blur(16px) saturate(170%);
   backdrop-filter: blur(16px) saturate(170%);
   border: 1px solid rgba(255,255,255,.08);
   cursor: pointer;
   transition: transform .18s ease, background .25s ease, border-color .25s ease;
+  display: flex; align-items: center;
 }
 .ending:active { transform: scale(.98); }
 .ending.liked {
@@ -110,6 +112,7 @@ html, body {
   box-shadow: 0 6px 32px rgba(255, 64, 129, .25);
 }
 .ending .text {
+  flex: 1;
   font-size: clamp(17px, 4.5vw, 22px);
   font-weight: 700;
   line-height: 1.22;
@@ -117,12 +120,16 @@ html, body {
   text-shadow: 0 2px 14px rgba(0,0,0,.6);
 }
 .ending .row {
-  margin-top: 8px;
-  display: flex; align-items: center; gap: 8px;
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
   font-size: 12px;
+  pointer-events: none;
 }
 .ending .heart {
-  width: 17px; height: 17px;
+  width: 22px; height: 22px;
   display: inline-block;
   background: currentColor;
   -webkit-mask: var(--heart) center/contain no-repeat;
@@ -136,7 +143,7 @@ html, body {
 .ending .likes {
   font-variant-numeric: tabular-nums;
   font-weight: 800;
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: .3px;
 }
 .ending .likes-pulse {
