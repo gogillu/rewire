@@ -204,6 +204,118 @@ html, body {
 }
 .audio-toggle svg { width: 18px; height: 18px; fill: currentColor; }
 
+/* Feedback widget — subtle top-left icon after 3 cards viewed */
+.fb-btn {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 14px;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.08);
+  color: rgba(255,255,255,.7);
+  z-index: 11;
+  cursor: pointer;
+  display: none; align-items: center; justify-content: center;
+  -webkit-backdrop-filter: blur(8px);
+          backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity .8s ease;
+}
+.fb-btn.shown { display: flex; opacity: .55; }
+.fb-btn:hover { opacity: 1; }
+.fb-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+#fbModal {
+  position: fixed; inset: 0;
+  z-index: 200;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.65);
+  -webkit-backdrop-filter: blur(8px);
+          backdrop-filter: blur(8px);
+}
+#fbModal.open { display: flex; }
+#fbModal .panel {
+  width: min(92vw, 360px);
+  background: linear-gradient(180deg, #15151a, #0e0e12);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 22px;
+  padding: 22px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.6);
+}
+#fbModal h3 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  letter-spacing: .3px;
+}
+#fbModal .desc { font-size: 12px; opacity: .55; margin-bottom: 16px; letter-spacing: .4px; }
+#fbModal .opts { display: flex; flex-direction: column; gap: 8px; }
+#fbModal .opt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 14px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  font-size: 15px; font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+  transition: background .2s ease, transform .15s ease;
+}
+#fbModal .opt:hover { background: rgba(255,255,255,.08); }
+#fbModal .opt:active { transform: scale(.98); }
+#fbModal .opt .emoji { font-size: 18px; }
+#fbCustomWrap { display: none; margin-top: 12px; }
+#fbCustomWrap.open { display: block; }
+#fbCustomWrap textarea {
+  width: 100%;
+  min-height: 70px;
+  resize: vertical;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+}
+#fbCustomWrap .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+#fbCustomWrap .send {
+  background: linear-gradient(90deg, #ff007a, #ff8a00);
+  color: #fff;
+  border: 0;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-weight: 700; letter-spacing: .4px;
+  cursor: pointer;
+}
+#fbModal .close-x {
+  position: absolute; top: 12px; right: 14px;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: transparent;
+  border: 0;
+  color: rgba(255,255,255,.6);
+  font-size: 18px; line-height: 1;
+  cursor: pointer;
+}
+#fbModal .panel { position: relative; }
+.fb-toast {
+  position: fixed;
+  bottom: 80px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20,20,24,.92);
+  border: 1px solid rgba(255,255,255,.1);
+  padding: 10px 22px;
+  border-radius: 999px;
+  font-size: 14px; font-weight: 600;
+  color: #fff;
+  z-index: 250;
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  animation: tIn .3s ease both;
+}
+@keyframes tIn { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
 #splash {
   position: fixed; inset: 0;
   z-index: 100;
@@ -247,6 +359,27 @@ html, body {
 <button class="audio-toggle" id="audioBtn" aria-label="Toggle sound">
   <svg viewBox="0 0 24 24" id="audioIcon"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
 </button>
+
+<button class="fb-btn" id="fbBtn" aria-label="Send feedback" title="Tell us what you think">
+  <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-9 12H7v-2h4v2zm6-4H7V8h10v2z"/></svg>
+</button>
+
+<div id="fbModal" role="dialog" aria-modal="true" aria-label="Feedback">
+  <div class="panel">
+    <button class="close-x" id="fbClose" aria-label="Close">×</button>
+    <h3>How's Rewire?</h3>
+    <div class="desc">One tap. Helps us tune the experience.</div>
+    <div class="opts">
+      <button class="opt" data-kind="interesting"><span class="emoji">🤩</span> Interesting</button>
+      <button class="opt" data-kind="stupid"><span class="emoji">🙄</span> Stupid app</button>
+      <button class="opt" data-kind="custom"><span class="emoji">✍️</span> Tell us yourself</button>
+    </div>
+    <div id="fbCustomWrap">
+      <textarea id="fbCustom" maxlength="2000" placeholder="What's on your mind…"></textarea>
+      <div class="row"><button class="send" id="fbSubmit">Send</button></div>
+    </div>
+  </div>
+</div>
 
 <div id="deck"></div>
 <div id="empty"><p>Loading the alternate universe…</p></div>

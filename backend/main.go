@@ -56,6 +56,8 @@ type Server struct {
 	cacheMu   sync.RWMutex
 	cacheJSON []byte
 	cacheAt   time.Time
+
+	geo *geoCache
 }
 
 const schemaSQL = `
@@ -107,8 +109,12 @@ func main() {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		log.Fatalf("rewire: schema: %v", err)
 	}
+	if _, err := db.Exec(telemetrySchema); err != nil {
+		log.Fatalf("rewire: telemetry schema: %v", err)
+	}
 
 	srv := &Server{db: db, frontendDir: *frontDir, dataDir: *dataDir}
+	srv.initGeoCache()
 
 	// Seed movies from movies.json on every boot — INSERT OR IGNORE so we
 	// never clobber endings/likes that already exist for previously seeded
@@ -125,6 +131,10 @@ func main() {
 	mux.HandleFunc("GET /api/health", srv.handleHealth)
 	mux.HandleFunc("GET /api/movies", srv.handleMovies)
 	mux.HandleFunc("POST /api/like", srv.handleLike)
+	mux.HandleFunc("POST /api/events", srv.handleEvents)
+	mux.HandleFunc("POST /api/feedback", srv.handleFeedback)
+	mux.HandleFunc("GET /api/stats", srv.handleStats)
+	mux.HandleFunc("GET /dashboard", srv.handleDashboard)
 	mux.HandleFunc("POST /api/admin/upsert-ending", srv.handleUpsertEnding)
 	mux.Handle("GET /audio/", srv.audioHandler())
 	mux.Handle("/", srv.staticHandler())
@@ -492,3 +502,7 @@ func shuffleStable(m []Movie, seed uint64) {
 	r := rand.New(rand.NewPCG(seed, seed^0x9E3779B97F4A7C15))
 	r.Shuffle(len(m), func(i, j int) { m[i], m[j] = m[j], m[i] })
 }
+
+// envLookup is a thin wrapper so telemetry.go can read env without importing
+// "os" twice in inline helpers.
+func envLookup(k string) string { return os.Getenv(k) }

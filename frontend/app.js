@@ -62,7 +62,113 @@
     audio: null,           // single HTMLAudio element shared across cards
     activeIdx: -1,
     currentSrc: null,
+    activeStartedAt: 0,    // ms timestamp current card became active
+    cardsViewed: 0,        // monotonic count, used to gate feedback widget
   };
+
+  // ---------- Telemetry ----------
+  // Per-tab uuid (sessionStorage) + per-device uuid (localStorage). The
+  // device uuid lets us count distinct visitors without any login.
+  const SESSION_ID = (() => {
+    let s = sessionStorage.getItem('rw_sid');
+    if (!s) { s = uuid(); sessionStorage.setItem('rw_sid', s); }
+    return s;
+  })();
+  const ANON_ID = (() => {
+    let a = localStorage.getItem('rw_aid');
+    if (!a) { a = uuid(); localStorage.setItem('rw_aid', a); }
+    return a;
+  })();
+  function uuid() {
+    if (crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random()*16|0, v = c==='x' ? r : (r&0x3|0x8);
+      return v.toString(16);
+    });
+  }
+  const ENV = detectClient();
+  function detectClient() {
+    const ua = navigator.userAgent || '';
+    let os='unknown', browser='unknown', device='desktop';
+    if (/Android/i.test(ua)) { os='Android'; device='mobile'; }
+    else if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints>1)) { os='iPadOS'; device='tablet'; }
+    else if (/iPhone|iPod/i.test(ua)) { os='iOS'; device='mobile'; }
+    else if (/Windows/i.test(ua)) os='Windows';
+    else if (/Mac OS X/i.test(ua)) os='macOS';
+    else if (/Linux/i.test(ua)) os='Linux';
+    if (/Edg\//.test(ua)) browser='Edge';
+    else if (/SamsungBrowser/.test(ua)) browser='Samsung';
+    else if (/OPR\//.test(ua)) browser='Opera';
+    else if (/Chrome\//.test(ua) && !/Chromium/.test(ua)) browser='Chrome';
+    else if (/Firefox\//.test(ua)) browser='Firefox';
+    else if (/Safari\//.test(ua) && !/Chrome|Chromium|Edg|OPR/.test(ua)) browser='Safari';
+    if (device==='desktop' && /Mobi|Android/i.test(ua)) device='mobile';
+    return { os, browser, device };
+  }
+  const telemetryQueue = [];
+  function track(type, fields = {}) {
+    telemetryQueue.push({
+      ts: Date.now(),
+      type,
+      movie_id: fields.movie_id,
+      ending_id: fields.ending_id,
+      duration_ms: fields.duration_ms,
+      audio_playing: state.audioOn ? 1 : 0,
+      extra: fields.extra,
+    });
+    if (telemetryQueue.length >= 20) flushTelemetry();
+  }
+  let flushing = false;
+  async function flushTelemetry(useBeacon = false) {
+    if (flushing || telemetryQueue.length === 0) return;
+    flushing = true;
+    const batch = telemetryQueue.splice(0, telemetryQueue.length);
+    const body = JSON.stringify({
+      session_id: SESSION_ID, anon_id: ANON_ID,
+      os: ENV.os, browser: ENV.browser, device: ENV.device,
+      screen_w: window.innerWidth, screen_h: window.innerHeight,
+      events: batch,
+    });
+    try {
+      if (useBeacon && navigator.sendBeacon) {
+        navigator.sendBeacon('/api/events', new Blob([body], { type: 'application/json' }));
+      } else {
+        await fetch('/api/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body, keepalive: true,
+        });
+      }
+    } catch {
+      // Drop on transient error; we already removed them from the queue
+      // since the next flush should pick up live state anyway.
+    } finally {
+      flushing = false;
+    }
+  }
+  setInterval(() => flushTelemetry(false), 5000);
+  window.addEventListener('pagehide', () => {
+    // Final dwell-time for whatever card is active.
+    if (state.activeIdx >= 0 && state.activeStartedAt) {
+      const m = state.movies[state.activeIdx];
+      if (m) {
+        telemetryQueue.push({
+          ts: Date.now(), type: 'impression',
+          movie_id: m.id,
+          duration_ms: Date.now() - state.activeStartedAt,
+          audio_playing: state.audioOn ? 1 : 0,
+        });
+      }
+    }
+    track('session_end');
+    flushTelemetry(true);
+  });
+  window.addEventListener('visibilitychange', () => {
+    track(document.hidden ? 'tab_hidden' : 'tab_visible');
+    if (document.hidden) flushTelemetry(false);
+  });
+  // Initial session_start.
+  track('session_start', { extra: { ref: document.referrer || '', tz: Intl.DateTimeFormat().resolvedOptions().timeZone || '' } });
 
   // ---------- API ----------
   async function fetchMovies() {
@@ -230,11 +336,13 @@
     $$('.ending', card).forEach(x => x.classList.remove('liked'));
     el.classList.add('liked');
     bumpLike(el, +1);
+    track('like', { movie_id: movieId, ending_id: endingId });
     if (typeof prev === 'number') {
       const siblings = $$('.ending', card);
       const prevEl = siblings.find(x => Number(x.dataset.endingId) === prev);
       if (prevEl) bumpLike(prevEl, -1);
       postLike(prev, -1);
+      track('unlike', { movie_id: movieId, ending_id: prev });
     }
     await idbPut('likes', { movieId, endingId, ts: Date.now() });
     postLike(endingId, +1);
@@ -271,8 +379,25 @@
     state.cardEls.forEach(el => io.observe(el));
   }
   function onCardActive(idx) {
+    // Emit dwell-time for the card we're leaving.
+    if (state.activeIdx >= 0 && state.activeIdx !== idx && state.activeStartedAt) {
+      const prev = state.movies[state.activeIdx];
+      if (prev) {
+        telemetryQueue.push({
+          ts: Date.now(),
+          type: 'impression',
+          movie_id: prev.id,
+          duration_ms: Date.now() - state.activeStartedAt,
+          audio_playing: state.audioOn ? 1 : 0,
+        });
+      }
+    }
+    state.activeStartedAt = Date.now();
+    state.cardsViewed += 1;
+    maybeShowFeedbackHint();
     const m = state.movies[idx];
     if (!m) return;
+    track('card_enter', { movie_id: m.id });
     [idx + 1, idx + 2, idx + 3].forEach(j => preload(state.movies[j]));
     if (m.has_audio) playAudio(m.id);
     else stopAudio();
@@ -316,6 +441,7 @@
   }
   function setAudio(on) {
     state.audioOn = on;
+    track(on ? 'audio_on' : 'audio_off');
     const ic = $('#audioIcon');
     if (on) ic.innerHTML = `<path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>`;
     else ic.innerHTML = `<path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>`;
@@ -355,9 +481,76 @@
     }
   }
 
+  // ---------- Feedback widget ----------
+  // Subtle icon top-left appears after 3 cards are viewed. Tap → modal with
+  // 3 options (interesting / stupid / custom). Submitted feedback POSTs to
+  // /api/feedback and then the icon goes dormant for 24 h.
+  function maybeShowFeedbackHint() {
+    if (state.cardsViewed < 3) return;
+    const btn = $('#fbBtn');
+    if (!btn || btn.classList.contains('shown')) return;
+    if (localStorage.getItem('rw_fb_until') &&
+        Date.now() < +localStorage.getItem('rw_fb_until')) return;
+    btn.classList.add('shown');
+  }
+  function openFeedback() {
+    track('feedback_open');
+    const m = $('#fbModal');
+    m.classList.add('open');
+    $('#fbCustom').value = '';
+  }
+  function closeFeedback() {
+    $('#fbModal').classList.remove('open');
+  }
+  async function submitFeedback(kind, text) {
+    closeFeedback();
+    track('feedback_submit', { extra: { kind, len: (text||'').length } });
+    try {
+      await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: SESSION_ID, anon_id: ANON_ID, kind, text }),
+        keepalive: true,
+      });
+    } catch {}
+    // Hide the icon for 24 h after a submission.
+    localStorage.setItem('rw_fb_until', String(Date.now() + 24*60*60*1000));
+    $('#fbBtn').classList.remove('shown');
+    // Tiny toast.
+    const t = document.createElement('div');
+    t.className = 'fb-toast';
+    t.textContent = 'Thanks ✨';
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 1600);
+  }
+  function setupFeedback() {
+    $('#fbBtn').addEventListener('click', openFeedback);
+    $('#fbClose').addEventListener('click', closeFeedback);
+    $('#fbModal').addEventListener('click', (e) => {
+      if (e.target.id === 'fbModal') closeFeedback();
+    });
+    $$('#fbModal [data-kind]').forEach(b => {
+      b.addEventListener('click', () => {
+        const kind = b.dataset.kind;
+        if (kind === 'custom') {
+          $('#fbCustomWrap').classList.add('open');
+          $('#fbCustom').focus();
+          return;
+        }
+        submitFeedback(kind, '');
+      });
+    });
+    $('#fbSubmit').addEventListener('click', () => {
+      const txt = $('#fbCustom').value.trim();
+      if (!txt) return;
+      submitFeedback('custom', txt);
+    });
+  }
+
   // ---------- Boot ----------
   $('#splash').addEventListener('click', dismissSplash, { once: true });
   $('#audioBtn').addEventListener('click', () => setAudio(!state.audioOn));
+  setupFeedback();
 
   (async function boot() {
     try {
