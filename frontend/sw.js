@@ -1,5 +1,5 @@
 // Rewire service worker — cache-first for static + audio, network-first for API.
-const VERSION = 'rewire-v5';
+const VERSION = 'rewire-v6';
 const STATIC_CACHE = `${VERSION}-static`;
 const AUDIO_CACHE = `${VERSION}-audio`;
 
