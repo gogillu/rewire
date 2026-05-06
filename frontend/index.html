@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Rewire — Alternate endings of Bollywood</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  background: #000; color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", "Inter", sans-serif;
+  overflow: hidden;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#deck {
+  height: 100dvh;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+.card {
+  position: relative;
+  height: 100dvh;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  overflow: hidden;
+  isolation: isolate;
+  background: #0b0b0b;
+}
+.card .poster {
+  position: absolute; inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: brightness(0.55) saturate(1.05);
+  transition: opacity .4s ease, transform 1.6s ease;
+  transform: scale(1.06);
+  opacity: 0;
+}
+.card.ready .poster { opacity: 1; transform: scale(1); }
+.card .vignette {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 30%, transparent 0%, rgba(0,0,0,.55) 75%, rgba(0,0,0,.85) 100%),
+    linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.05) 35%, rgba(0,0,0,.55) 75%, rgba(0,0,0,.92) 100%);
+  pointer-events: none;
+}
+.card .meta {
+  position: absolute; left: 0; right: 0; top: env(safe-area-inset-top, 0);
+  padding: 22px 22px 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.card .meta .title {
+  font-size: clamp(22px, 5.5vw, 32px);
+  font-weight: 700;
+  letter-spacing: .2px;
+  line-height: 1.05;
+  text-shadow: 0 2px 16px rgba(0,0,0,.65);
+}
+.card .meta .sub {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: .75;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+}
+
+.card .endings {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  padding: 0 18px;
+  display: flex; flex-direction: column; gap: 10px;
+  z-index: 3;
+}
+.ending {
+  position: relative;
+  border-radius: 18px;
+  padding: 16px 16px 14px;
+  background: rgba(20,20,20,.55);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(255,255,255,.09);
+  cursor: pointer;
+  transition: transform .18s ease, background .18s ease, border-color .18s ease;
+  overflow: hidden;
+}
+.ending:active { transform: scale(.98); }
+.ending.liked {
+  background: linear-gradient(135deg, rgba(255, 64, 129, .35), rgba(120, 40, 200, .25));
+  border-color: rgba(255, 64, 129, .55);
+}
+.ending .text {
+  font-size: clamp(17px, 4.6vw, 22px);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: .1px;
+  text-shadow: 0 2px 10px rgba(0,0,0,.5);
+}
+.ending .row {
+  margin-top: 8px;
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12px;
+  opacity: .85;
+}
+.ending .heart {
+  width: 18px; height: 18px;
+  display: inline-block; vertical-align: -3px;
+  margin-right: 4px;
+  background: currentColor;
+  -webkit-mask: var(--heart) center/contain no-repeat;
+          mask: var(--heart) center/contain no-repeat;
+}
+:root {
+  --heart: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 21s-7.5-4.7-9.6-9.4C1 7.7 4 4 7.5 4c2 0 3.7 1 4.5 2.6C12.8 5 14.5 4 16.5 4 20 4 23 7.7 21.6 11.6 19.5 16.3 12 21 12 21z'/></svg>");
+}
+.ending .likes {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.ending .model {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  opacity: .55;
+}
+.ending.placeholder {
+  background: rgba(20,20,20,.35);
+  cursor: default;
+  pointer-events: none;
+}
+.ending.placeholder .text { opacity: .55; font-style: italic; font-weight: 500; }
+
+/* Header / footer */
+.brand {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 0; right: 0;
+  text-align: center;
+  z-index: 10;
+  pointer-events: none;
+}
+.brand .logo {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.35);
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.08);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  background-image: linear-gradient(90deg, #ff8a00, #ff007a 35%, #8e2de2 70%, #4a00e0);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.brand .logo::before {
+  content: "◆ ";
+  -webkit-text-fill-color: #ff007a;
+}
+
+.audio-toggle {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  right: 14px;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.45);
+  border: 1px solid rgba(255,255,255,.1);
+  color: #fff;
+  z-index: 11;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+}
+.audio-toggle svg { width: 18px; height: 18px; fill: currentColor; }
+
+#yt-host {
+  position: fixed;
+  top: -10px; left: -10px;
+  width: 1px; height: 1px;
+  opacity: 0.001;
+  pointer-events: none;
+  z-index: -1;
+}
+
+#splash {
+  position: fixed; inset: 0;
+  z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column;
+  background: radial-gradient(ellipse at center, #1a0033, #000);
+  text-align: center;
+  cursor: pointer;
+  transition: opacity .5s ease;
+}
+#splash.gone { opacity: 0; pointer-events: none; }
+#splash .title {
+  font-size: 64px;
+  font-weight: 900;
+  letter-spacing: 8px;
+  background-image: linear-gradient(90deg, #ff8a00, #ff007a 35%, #8e2de2 70%, #4a00e0);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+#splash .tag { margin-top: 12px; opacity: .65; font-size: 14px; letter-spacing: 1.4px; text-transform: uppercase; }
+#splash .cta { margin-top: 36px; font-size: 12px; opacity: .55; letter-spacing: 2px; text-transform: uppercase; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.85} }
+
+#empty {
+  position: fixed; inset: 0;
+  display: none; align-items: center; justify-content: center;
+  z-index: 50; text-align: center; padding: 24px;
+}
+#empty.show { display: flex; }
+#empty p { opacity: .6; max-width: 360px; line-height: 1.5; }
+
+.swipe-hint {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 220px);
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  opacity: .5;
+  z-index: 4;
+  animation: float 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes float {
+  0%,100% { transform: translate(-50%, 0); opacity: .35; }
+  50%     { transform: translate(-50%, 8px); opacity: .65; }
+}
+</style>
+</head>
+<body>
+<div id="splash">
+  <div class="title">REWIRE</div>
+  <div class="tag">Alternate Endings · Bollywood</div>
+  <div class="cta">Tap to begin</div>
+</div>
+
+<div class="brand"><span class="logo">Rewire</span></div>
+
+<button class="audio-toggle" id="audioBtn" aria-label="Toggle sound">
+  <svg viewBox="0 0 24 24" id="audioIcon"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+</button>
+
+<div id="deck"></div>
+<div id="empty"><p>Loading the alternate universe…</p></div>
+<div id="yt-host"></div>
+
+<script src="/app.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>

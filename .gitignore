@@ -1,0 +1,9 @@
+# Build artefacts and runtime state
+bin/
+data/rewire.db
+data/rewire.db-shm
+data/rewire.db-wal
+
+# Scratch
+*.log
+.vscode/
