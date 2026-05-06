@@ -166,7 +166,16 @@
     vig.className = 'vignette';
     card.appendChild(vig);
 
-    // Endings on TOP — three stacked cards. Like history persists.
+    // TOP — movie title + year + IMDb rating
+    const top = document.createElement('div');
+    top.className = 'top';
+    top.innerHTML = `
+      <div class="title">${escapeHTML(m.title)}</div>
+      <div class="sub">${m.year || ''} · ★ ${(m.imdb_rating || 0).toFixed(1)}</div>
+    `;
+    card.appendChild(top);
+
+    // BOTTOM — three endings stacked just above the brand chip.
     const wrap = document.createElement('div');
     wrap.className = 'endings';
     const liked = state.likeMap.get(m.id);
@@ -195,15 +204,11 @@
     });
     card.appendChild(wrap);
 
-    // BOTTOM — movie title + Rewire logo (no longer overlapping content)
-    const bot = document.createElement('div');
-    bot.className = 'bottom';
-    bot.innerHTML = `
-      <div class="title">${escapeHTML(m.title)}</div>
-      <div class="sub">${m.year || ''} · ★ ${(m.imdb_rating || 0).toFixed(1)}</div>
-      <div class="logo">Rewire</div>
-    `;
-    card.appendChild(bot);
+    // VERY BOTTOM — Rewire brand chip
+    const brand = document.createElement('div');
+    brand.className = 'brand';
+    brand.innerHTML = `<div class="logo">Rewire</div>`;
+    card.appendChild(brand);
     return card;
   }
 
