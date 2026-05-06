@@ -85,6 +85,7 @@ type eventBatch struct {
 	Device    string        `json:"device"`
 	ScreenW   int           `json:"screen_w"`
 	ScreenH   int           `json:"screen_h"`
+	Mode      string        `json:"mode"`
 	Events    []clientEvent `json:"events"`
 }
 
@@ -93,6 +94,7 @@ type feedbackBody struct {
 	AnonID    string `json:"anon_id"`
 	Kind      string `json:"kind"` // interesting|stupid|custom
 	Text      string `json:"text,omitempty"`
+	Mode      string `json:"mode,omitempty"`
 }
 
 // handleEvents accepts a batch of events from one client, persists them,
@@ -111,6 +113,10 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if len(b.Events) > 200 {
 		b.Events = b.Events[:200]
 	}
+	mode := strings.ToLower(strings.TrimSpace(b.Mode))
+	if mode != "abhinav" {
+		mode = "direct"
+	}
 	ip := clientIP(r)
 	ua := r.UserAgent()
 	if len(ua) > 400 {
@@ -128,8 +134,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
         INSERT INTO telemetry_events (
             ts, session_id, anon_id, event_type, movie_id, ending_id,
             duration_ms, audio_playing, ip, country, city, os, browser,
-            device, screen_w, screen_h, ua, extra_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            device, screen_w, screen_h, ua, extra_json, mode
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -157,7 +163,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if _, err := stmt.Exec(
 			ts, b.SessionID, b.AnonID, etype, movie, ev.EndingID,
 			ev.DurationMs, ev.AudioPlaying, ip, country, city, b.OS, b.Browser,
-			b.Device, b.ScreenW, b.ScreenH, ua, extra,
+			b.Device, b.ScreenW, b.ScreenH, ua, extra, mode,
 		); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -196,6 +202,10 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	if len(f.Text) > 2000 {
 		f.Text = f.Text[:2000]
 	}
+	mode := strings.ToLower(strings.TrimSpace(f.Mode))
+	if mode != "abhinav" {
+		mode = "direct"
+	}
 	ip := clientIP(r)
 	ua := r.UserAgent()
 	if len(ua) > 400 {
@@ -204,9 +214,9 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	country, _ := s.geoLookup(ip)
 
 	if _, err := s.db.ExecContext(r.Context(), `
-        INSERT INTO feedbacks (ts, session_id, anon_id, kind, text, ip, country, ua)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, time.Now().UnixMilli(), f.SessionID, f.AnonID, f.Kind, f.Text, ip, country, ua); err != nil {
+        INSERT INTO feedbacks (ts, session_id, anon_id, kind, text, ip, country, ua, mode)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, time.Now().UnixMilli(), f.SessionID, f.AnonID, f.Kind, f.Text, ip, country, ua, mode); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

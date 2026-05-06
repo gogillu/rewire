@@ -112,9 +112,16 @@ func main() {
 	if _, err := db.Exec(telemetrySchema); err != nil {
 		log.Fatalf("rewire: telemetry schema: %v", err)
 	}
+	if _, err := db.Exec(abhinavSchema); err != nil {
+		log.Fatalf("rewire: abhinav schema: %v", err)
+	}
 
 	srv := &Server{db: db, frontendDir: *frontDir, dataDir: *dataDir}
 	srv.initGeoCache()
+	srv.migrateAddModeColumn()
+	if err := srv.seedAbhinavContent(); err != nil {
+		log.Printf("rewire: seed abhinav: %v", err)
+	}
 
 	// Seed movies from movies.json on every boot — INSERT OR IGNORE so we
 	// never clobber endings/likes that already exist for previously seeded
@@ -136,6 +143,12 @@ func main() {
 	mux.HandleFunc("GET /api/stats", srv.handleStats)
 	mux.HandleFunc("GET /dashboard", srv.handleDashboard)
 	mux.HandleFunc("POST /api/admin/upsert-ending", srv.handleUpsertEnding)
+	mux.HandleFunc("GET /api/abhinav/movies", srv.handleAbhinavMovies)
+	mux.HandleFunc("POST /api/abhinav/like", srv.handleAbhinavLike)
+	mux.HandleFunc("POST /api/abhinav/submit-ending", srv.handleAbhinavSubmitEnding)
+	mux.HandleFunc("POST /api/abhinav/rate-ending", srv.handleAbhinavRateEnding)
+	mux.Handle("GET /abhinav", srv.handleAbhinavFrontend())
+	mux.Handle("GET /abhinav/", srv.handleAbhinavFrontend())
 	mux.Handle("GET /audio/", srv.audioHandler())
 	mux.Handle("/", srv.staticHandler())
 

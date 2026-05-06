@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Rewire · Abhinav build — Alternate endings</title>
+<link rel="manifest" href="/abhinav/manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="/abhinav/icon.svg">
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  background: #000; color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", "Inter", sans-serif;
+  overflow: hidden;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#deck {
+  height: 100dvh;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+#deck::-webkit-scrollbar { display: none; }
+
+.card {
+  position: relative;
+  height: 100dvh;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  overflow: hidden;
+  isolation: isolate;
+  background: #0b0b0b;
+}
+.card .poster {
+  position: absolute; inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: brightness(0.55) saturate(1.05);
+  transition: opacity .5s ease, transform 1.6s ease;
+  transform: scale(1.08);
+  opacity: 0;
+}
+.card.ready .poster { opacity: 1; transform: scale(1); }
+.card .vignette {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 40%, transparent 0%, rgba(0,0,0,.45) 70%, rgba(0,0,0,.85) 100%),
+    linear-gradient(180deg, rgba(0,0,0,.62) 0%, rgba(0,0,0,.0) 22%, rgba(0,0,0,.0) 48%, rgba(0,0,0,.55) 72%, rgba(0,0,0,.94) 100%);
+  pointer-events: none;
+}
+
+/* Build badge — top-right corner pill so this build is visually distinct. */
+.build-badge {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff007a, #ff8a00);
+  color: #fff;
+  font-weight: 800;
+  z-index: 12;
+  box-shadow: 0 4px 18px rgba(255,0,122,.35);
+  pointer-events: none;
+}
+
+/* TOP — movie title + year/rating + kind chip */
+.top {
+  position: absolute;
+  left: 0; right: 0;
+  top: calc(env(safe-area-inset-top, 0px) + 50px);
+  padding: 0 16px;
+  z-index: 4;
+  display: flex; flex-direction: column; gap: 4px;
+  align-items: center;
+  text-align: center;
+  pointer-events: none;
+}
+.top .title {
+  font-size: clamp(22px, 6vw, 30px);
+  font-weight: 800;
+  letter-spacing: .3px;
+  text-shadow: 0 2px 14px rgba(0,0,0,.8);
+  max-width: 92vw;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.top .sub {
+  font-size: 11px;
+  opacity: .75;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  text-shadow: 0 1px 8px rgba(0,0,0,.7);
+}
+.top .kind {
+  font-size: 10px;
+  letter-spacing: 2px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-top: 4px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.kind-movie  { background: rgba(255,255,255,.12); color: #fff; }
+.kind-series { background: linear-gradient(90deg, #6f6, #4af); color: #001a1a; }
+
+/* BOTTOM — endings stacked just above brand */
+.endings {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 54px);
+  padding: 0 14px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 3;
+  max-height: 62vh;
+  overflow-y: auto;
+}
+.endings::-webkit-scrollbar { display: none; }
+.ending {
+  position: relative;
+  border-radius: 18px;
+  padding: 12px 16px;
+  padding-right: 84px;
+  background: rgba(15,15,18,.55);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
+  backdrop-filter: blur(16px) saturate(170%);
+  border: 1px solid rgba(255,255,255,.08);
+  cursor: pointer;
+  transition: transform .18s ease, background .25s ease, border-color .25s ease;
+  display: flex; align-items: center;
+}
+.ending:active { transform: scale(.98); }
+.ending.liked {
+  background: linear-gradient(135deg, rgba(255, 64, 129, .42), rgba(120, 40, 200, .30));
+  border-color: rgba(255, 64, 129, .55);
+  box-shadow: 0 6px 32px rgba(255, 64, 129, .25);
+}
+.ending .body { flex: 1; min-width: 0; }
+.ending .text {
+  font-size: clamp(15px, 4vw, 19px);
+  font-weight: 700;
+  line-height: 1.28;
+  letter-spacing: .1px;
+  text-shadow: 0 2px 14px rgba(0,0,0,.6);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ending.expanded .text {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+.ending .meta {
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: .4px;
+  display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap;
+  opacity: .82;
+}
+.ending .author {
+  color: #ffd35e;
+  font-weight: 700;
+}
+.ending.community .author { color: #7dffae; }
+.ending .more-btn {
+  background: transparent;
+  border: 0;
+  color: #9faaff;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: .4px;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.ending .stars {
+  display: inline-flex; gap: 2px;
+  font-size: 13px;
+  cursor: default;
+}
+.ending .stars button {
+  background: transparent;
+  border: 0;
+  color: rgba(255,255,255,.4);
+  font: inherit;
+  font-size: 14px;
+  padding: 0;
+  cursor: pointer;
+  transition: color .2s ease, transform .15s ease;
+}
+.ending .stars button.lit { color: #ffd35e; }
+.ending .stars button:hover { transform: scale(1.18); }
+.ending .row {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font-size: 12px;
+  pointer-events: none;
+}
+.ending .heart {
+  width: 22px; height: 22px;
+  display: inline-block;
+  background: currentColor;
+  -webkit-mask: var(--heart) center/contain no-repeat;
+          mask: var(--heart) center/contain no-repeat;
+  opacity: .85;
+}
+.ending.liked .heart { color: #ff4081; opacity: 1; }
+:root {
+  --heart: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 21s-7.5-4.7-9.6-9.4C1 7.7 4 4 7.5 4c2 0 3.7 1 4.5 2.6C12.8 5 14.5 4 16.5 4 20 4 23 7.7 21.6 11.6 19.5 16.3 12 21 12 21z'/></svg>");
+}
+.ending .likes {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: .3px;
+}
+.ending.placeholder {
+  background: rgba(20,20,20,.30);
+  cursor: default;
+  pointer-events: none;
+}
+.ending.placeholder .text { opacity: .55; font-style: italic; font-weight: 500; }
+
+/* Write-your-own tile — sits beside the 3 endings as a 4th option */
+.ending.write-own {
+  background: rgba(255, 255, 255, .03);
+  border: 1px dashed rgba(255,255,255,.22);
+  font-style: normal;
+}
+.ending.write-own .text {
+  color: rgba(255,255,255,.78);
+  font-weight: 700;
+}
+.ending.write-own .row { display: none; }
+
+/* BOTTOM brand chip */
+.brand {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  z-index: 4;
+  text-align: center;
+  pointer-events: none;
+}
+.brand .logo {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  background-image: linear-gradient(90deg, #ff8a00, #ff007a 35%, #8e2de2 70%, #4a00e0);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.brand .logo::before {
+  content: "◆";
+  margin-right: 6px;
+  -webkit-text-fill-color: #ff007a;
+  font-size: 10px;
+}
+
+.audio-toggle {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  right: 14px;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.45);
+  border: 1px solid rgba(255,255,255,.1);
+  color: #fff;
+  z-index: 11;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+}
+.audio-toggle svg { width: 18px; height: 18px; fill: currentColor; }
+
+/* Feedback widget — subtle top-left */
+.fb-btn {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 14px;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.08);
+  color: rgba(255,255,255,.7);
+  z-index: 11;
+  cursor: pointer;
+  display: none; align-items: center; justify-content: center;
+  -webkit-backdrop-filter: blur(8px);
+          backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity .8s ease;
+}
+.fb-btn.shown { display: flex; opacity: .55; }
+.fb-btn:hover { opacity: 1; }
+.fb-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+#fbModal, #weModal {
+  position: fixed; inset: 0;
+  z-index: 200;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.65);
+  -webkit-backdrop-filter: blur(8px);
+          backdrop-filter: blur(8px);
+}
+#fbModal.open, #weModal.open { display: flex; }
+#fbModal .panel, #weModal .panel {
+  width: min(92vw, 380px);
+  background: linear-gradient(180deg, #15151a, #0e0e12);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 22px;
+  padding: 22px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.6);
+  position: relative;
+}
+#fbModal h3, #weModal h3 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  letter-spacing: .3px;
+}
+#fbModal .desc, #weModal .desc { font-size: 12px; opacity: .55; margin-bottom: 16px; letter-spacing: .4px; }
+#fbModal .opts { display: flex; flex-direction: column; gap: 8px; }
+#fbModal .opt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 14px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  font-size: 15px; font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+}
+#fbModal .opt:hover { background: rgba(255,255,255,.08); }
+#fbModal .opt:active { transform: scale(.98); }
+#fbModal .opt .emoji { font-size: 18px; }
+#fbCustomWrap { display: none; margin-top: 12px; }
+#fbCustomWrap.open { display: block; }
+#fbCustomWrap textarea, #weText {
+  width: 100%;
+  min-height: 70px;
+  resize: vertical;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+}
+#weAuthor {
+  width: 100%;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 999px;
+  padding: 8px 14px;
+  margin-top: 8px;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+}
+#fbCustomWrap .row, #weModal .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+#fbCustomWrap .send, #weModal .send {
+  background: linear-gradient(90deg, #ff007a, #ff8a00);
+  color: #fff;
+  border: 0;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-weight: 700; letter-spacing: .4px;
+  cursor: pointer;
+}
+#fbModal .close-x, #weModal .close-x {
+  position: absolute; top: 12px; right: 14px;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: transparent;
+  border: 0;
+  color: rgba(255,255,255,.6);
+  font-size: 18px; line-height: 1;
+  cursor: pointer;
+}
+.fb-toast {
+  position: fixed;
+  bottom: 80px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20,20,24,.92);
+  border: 1px solid rgba(255,255,255,.1);
+  padding: 10px 22px;
+  border-radius: 999px;
+  font-size: 14px; font-weight: 600;
+  color: #fff;
+  z-index: 250;
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  animation: tIn .3s ease both;
+}
+@keyframes tIn { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+#splash {
+  position: fixed; inset: 0;
+  z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column;
+  background: radial-gradient(ellipse at center, #1a0033, #000);
+  text-align: center;
+  cursor: pointer;
+  transition: opacity .5s ease;
+}
+#splash.gone { opacity: 0; pointer-events: none; }
+#splash .title {
+  font-size: clamp(48px, 14vw, 80px);
+  font-weight: 900;
+  letter-spacing: 8px;
+  background-image: linear-gradient(90deg, #ff8a00, #ff007a 35%, #8e2de2 70%, #4a00e0);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+#splash .tag { margin-top: 12px; opacity: .65; font-size: 13px; letter-spacing: 1.4px; text-transform: uppercase; }
+#splash .build { margin-top: 6px; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: #ffd35e; }
+#splash .cta { margin-top: 36px; font-size: 12px; opacity: .55; letter-spacing: 2px; text-transform: uppercase; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.85} }
+
+#empty {
+  position: fixed; inset: 0;
+  display: none; align-items: center; justify-content: center;
+  z-index: 50; text-align: center; padding: 24px;
+}
+#empty.show { display: flex; }
+#empty p { opacity: .6; max-width: 360px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div id="splash">
+  <div class="title">REWIRE</div>
+  <div class="tag">Alternate Endings · Cinema + Series</div>
+  <div class="build">Abhinav build · Beta</div>
+  <div class="cta">Tap to begin</div>
+</div>
+
+<div class="build-badge">Abhinav Build</div>
+
+<button class="audio-toggle" id="audioBtn" aria-label="Toggle sound">
+  <svg viewBox="0 0 24 24" id="audioIcon"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+</button>
+
+<button class="fb-btn" id="fbBtn" aria-label="Send feedback" title="Tell us what you think">
+  <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-9 12H7v-2h4v2zm6-4H7V8h10v2z"/></svg>
+</button>
+
+<div id="fbModal" role="dialog" aria-modal="true" aria-label="Feedback">
+  <div class="panel">
+    <button class="close-x" id="fbClose" aria-label="Close">×</button>
+    <h3>How's Rewire (Abhinav build)?</h3>
+    <div class="desc">One tap. Helps us tune the experience.</div>
+    <div class="opts">
+      <button class="opt" data-kind="interesting"><span class="emoji">🤩</span> Interesting</button>
+      <button class="opt" data-kind="stupid"><span class="emoji">🙄</span> Stupid app</button>
+      <button class="opt" data-kind="custom"><span class="emoji">✍️</span> Tell us yourself</button>
+    </div>
+    <div id="fbCustomWrap">
+      <textarea id="fbCustom" maxlength="2000" placeholder="What's on your mind…"></textarea>
+      <div class="row"><button class="send" id="fbSubmit">Send</button></div>
+    </div>
+  </div>
+</div>
+
+<div id="weModal" role="dialog" aria-modal="true" aria-label="Write your own ending">
+  <div class="panel">
+    <button class="close-x" id="weClose" aria-label="Close">×</button>
+    <h3>Write your own ending</h3>
+    <div class="desc" id="weFor">For: <span id="weTitle"></span></div>
+    <textarea id="weText" maxlength="200" placeholder="In ~10 words, what should have happened…"></textarea>
+    <input id="weAuthor" maxlength="32" placeholder="Your name or @handle (optional)">
+    <div class="row">
+      <button class="send" id="weSubmit">Submit</button>
+    </div>
+  </div>
+</div>
+
+<div id="deck"></div>
+<div id="empty"><p>Loading the alternate universe…</p></div>
+
+<script src="/abhinav/app.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/abhinav/sw.js', { scope: '/abhinav/' }).catch(()=>{});
+}
+</script>
+</body>
+</html>

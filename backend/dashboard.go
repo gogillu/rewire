@@ -16,18 +16,51 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	out := map[string]any{}
+	mode := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("mode")))
+	if mode != "direct" && mode != "abhinav" {
+		mode = "all"
+	}
+	// modeFilter inserts an AND clause for non-'all' modes; for 'all' it's
+	// a no-op so all rows are counted.
+	modeFilter := ""
+	args := []any{}
+	if mode != "all" {
+		modeFilter = " AND mode = ? "
+		args = append(args, mode)
+	}
+	// Some queries don't already have a WHERE clause; for those we use
+	// modeWhere which is " WHERE mode = ? " or empty.
+	modeWhere := ""
+	if mode != "all" {
+		modeWhere = " WHERE mode = ? "
+	}
+
+	out := map[string]any{"mode": mode}
 
 	// Totals.
 	var totalEvents, totalLikes, totalImpressions, totalFeedback int64
 	var uniqUsers, uniqSessions, uniqMovies int64
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM telemetry_events`).Scan(&totalEvents)
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM telemetry_events WHERE event_type='like'`).Scan(&totalLikes)
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM telemetry_events WHERE event_type='impression'`).Scan(&totalImpressions)
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM feedbacks`).Scan(&totalFeedback)
-	_ = s.db.QueryRow(`SELECT COUNT(DISTINCT anon_id) FROM telemetry_events`).Scan(&uniqUsers)
-	_ = s.db.QueryRow(`SELECT COUNT(DISTINCT session_id) FROM telemetry_events`).Scan(&uniqSessions)
-	_ = s.db.QueryRow(`SELECT COUNT(DISTINCT movie_id) FROM telemetry_events WHERE movie_id != ''`).Scan(&uniqMovies)
+	scanCount := func(q string, dest *int64) {
+		if mode == "all" {
+			_ = s.db.QueryRow(q).Scan(dest)
+			return
+		}
+		// Insert mode predicate. We rely on simple WHERE / AND patterns.
+		qq := q
+		if strings.Contains(strings.ToUpper(q), " WHERE ") {
+			qq = q + " AND mode = ?"
+		} else {
+			qq = q + " WHERE mode = ?"
+		}
+		_ = s.db.QueryRow(qq, mode).Scan(dest)
+	}
+	scanCount(`SELECT COUNT(*) FROM telemetry_events`, &totalEvents)
+	scanCount(`SELECT COUNT(*) FROM telemetry_events WHERE event_type='like'`, &totalLikes)
+	scanCount(`SELECT COUNT(*) FROM telemetry_events WHERE event_type='impression'`, &totalImpressions)
+	scanCount(`SELECT COUNT(*) FROM feedbacks`, &totalFeedback)
+	scanCount(`SELECT COUNT(DISTINCT anon_id) FROM telemetry_events`, &uniqUsers)
+	scanCount(`SELECT COUNT(DISTINCT session_id) FROM telemetry_events`, &uniqSessions)
+	scanCount(`SELECT COUNT(DISTINCT movie_id) FROM telemetry_events WHERE movie_id != ''`, &uniqMovies)
 
 	out["totals"] = map[string]int64{
 		"events":      totalEvents,
@@ -39,22 +72,23 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		"movies_seen": uniqMovies,
 	}
 
-	out["top_movies"] = queryRows(s.db, `
+	out["top_movies"] = queryRowsArgs(s.db, `
         SELECT
             te.movie_id        AS id,
-            COALESCE(m.title, te.movie_id) AS title,
+            COALESCE(m.title, ac.title, te.movie_id) AS title,
             COUNT(*)           AS impressions,
             COALESCE(SUM(te.duration_ms), 0)/1000.0 AS dwell_s,
             COALESCE(AVG(NULLIF(te.duration_ms,0)),0)/1000.0 AS avg_dwell_s,
             (SELECT COUNT(*) FROM telemetry_events te2
-                 WHERE te2.event_type='like' AND te2.movie_id = te.movie_id) AS likes
+                 WHERE te2.event_type='like' AND te2.movie_id = te.movie_id `+modeFilter+`) AS likes
         FROM telemetry_events te
         LEFT JOIN movies m ON m.id = te.movie_id
-        WHERE te.event_type='impression' AND te.movie_id != ''
+        LEFT JOIN abhinav_content ac ON ac.id = te.movie_id
+        WHERE te.event_type='impression' AND te.movie_id != '' `+modeFilter+`
         GROUP BY te.movie_id
         ORDER BY impressions DESC
         LIMIT 25
-    `)
+    `, append(append([]any{}, args...), args...)...)
 
 	out["ending_leaderboard"] = queryRows(s.db, `
         SELECT
@@ -71,45 +105,47 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
         LIMIT 30
     `)
 
-	out["countries"] = queryRows(s.db, `
+	out["countries"] = queryRowsArgs(s.db, `
         SELECT
             COALESCE(NULLIF(country,''),'Unknown') AS country,
             COUNT(DISTINCT anon_id) AS users,
             COUNT(*)                AS events
-        FROM telemetry_events
+        FROM telemetry_events `+modeWhere+`
         GROUP BY 1 ORDER BY users DESC LIMIT 20
-    `)
+    `, args...)
 
-	out["devices"] = queryRows(s.db, `
+	out["devices"] = queryRowsArgs(s.db, `
         SELECT
             COALESCE(NULLIF(device,''),'unknown')  AS device,
             COALESCE(NULLIF(os,''),'unknown')      AS os,
             COALESCE(NULLIF(browser,''),'unknown') AS browser,
             COUNT(DISTINCT anon_id) AS users
-        FROM telemetry_events
+        FROM telemetry_events `+modeWhere+`
         GROUP BY 1,2,3 ORDER BY users DESC LIMIT 20
-    `)
+    `, args...)
 
-	out["recent_feedback"] = queryRows(s.db, `
+	out["recent_feedback"] = queryRowsArgs(s.db, `
         SELECT
-            ts, kind, text, country, ip,
+            ts, kind, text, country, ip, mode,
             substr(anon_id,1,8) AS anon_short
-        FROM feedbacks
+        FROM feedbacks `+modeWhere+`
         ORDER BY ts DESC LIMIT 50
-    `)
+    `, args...)
 
 	// Hourly impression count for the last 7 days.
 	since := time.Now().Add(-7 * 24 * time.Hour).UnixMilli()
+	hourlyArgs := []any{since}
+	hourlyArgs = append(hourlyArgs, args...)
 	out["hourly_traffic"] = queryRowsArgs(s.db, `
         SELECT
             (ts/3600000)*3600 AS hour_unix,
             COUNT(*)           AS impressions
         FROM telemetry_events
-        WHERE event_type='impression' AND ts >= ?
+        WHERE event_type='impression' AND ts >= ? `+modeFilter+`
         GROUP BY 1 ORDER BY 1 ASC
-    `, since)
+    `, hourlyArgs...)
 
-	out["recent_users"] = queryRows(s.db, `
+	out["recent_users"] = queryRowsArgs(s.db, `
         SELECT
             substr(anon_id,1,8) AS anon_short,
             MAX(ts) AS last_seen,
@@ -117,19 +153,33 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
             COUNT(*) AS events,
             (SELECT country FROM telemetry_events te2 WHERE te2.anon_id = te.anon_id AND te2.country != '' LIMIT 1) AS country,
             (SELECT device  FROM telemetry_events te2 WHERE te2.anon_id = te.anon_id AND te2.device  != '' LIMIT 1) AS device,
-            (SELECT browser FROM telemetry_events te2 WHERE te2.anon_id = te.anon_id AND te2.browser != '' LIMIT 1) AS browser
-        FROM telemetry_events te
+            (SELECT browser FROM telemetry_events te2 WHERE te2.anon_id = te.anon_id AND te2.browser != '' LIMIT 1) AS browser,
+            (SELECT mode    FROM telemetry_events te2 WHERE te2.anon_id = te.anon_id ORDER BY ts DESC LIMIT 1) AS mode
+        FROM telemetry_events te `+modeWhere+`
         GROUP BY anon_id
         ORDER BY last_seen DESC LIMIT 30
-    `)
+    `, args...)
 
-	out["audio_health"] = queryRows(s.db, `
+	out["audio_health"] = queryRowsArgs(s.db, `
         SELECT
             event_type,
             COUNT(*) AS n
         FROM telemetry_events
-        WHERE event_type IN ('audio_on','audio_off','audio_error','audio_blocked')
+        WHERE event_type IN ('audio_on','audio_off','audio_error','audio_blocked') `+modeFilter+`
         GROUP BY event_type
+    `, args...)
+
+	// Per-mode split — always show, regardless of the mode filter.
+	out["mode_breakdown"] = queryRows(s.db, `
+        SELECT
+            COALESCE(NULLIF(mode,''),'direct') AS mode,
+            COUNT(*) AS events,
+            COUNT(DISTINCT anon_id) AS users,
+            COUNT(DISTINCT session_id) AS sessions,
+            SUM(CASE WHEN event_type='like' THEN 1 ELSE 0 END) AS likes,
+            SUM(CASE WHEN event_type='impression' THEN 1 ELSE 0 END) AS impressions
+        FROM telemetry_events
+        GROUP BY 1 ORDER BY events DESC
     `)
 
 	writeJSON(w, http.StatusOK, out)
@@ -242,6 +292,16 @@ input{background:#1d1d22;color:#fff;border:1px solid #2a2a30;padding:8px 10px;bo
 @media(max-width:760px){.flex2{grid-template-columns:1fr}}
 .gate{max-width:420px;margin:80px auto;padding:24px;background:var(--card);border-radius:16px;border:1px solid #232328}
 small{font-size:11px;color:var(--muted)}
+.modes{display:flex;gap:6px;margin:14px 0 4px;flex-wrap:wrap}
+.modes button{
+  background:#15151a;color:var(--muted);
+  border:1px solid #2a2a30;padding:6px 14px;border-radius:999px;
+  cursor:pointer;font-weight:600;font-size:12px;letter-spacing:.4px;text-transform:uppercase;
+}
+.modes button.active{background:linear-gradient(90deg,#ff007a,#ff8a00);color:#fff;border-color:transparent}
+.kind-abhinav{color:#ffd35e}
+.mode-pill{font-size:10px;padding:1px 7px;border-radius:999px;background:#1d1d22;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-left:6px}
+.mode-pill.abhinav{background:linear-gradient(90deg,#ff007a,#ff8a00);color:#fff}
 </style>
 </head>
 <body>
@@ -257,6 +317,15 @@ small{font-size:11px;color:var(--muted)}
 <div id="app" style="display:none">
   <h1>Rewire <span class="muted" style="font-weight:400">dashboard</span></h1>
   <div class="tag">Realtime telemetry · auto-refresh 30s</div>
+
+  <div class="modes" id="modeBar">
+    <button data-mode="all" class="active">All</button>
+    <button data-mode="direct">Direct (/)</button>
+    <button data-mode="abhinav">Abhinav (/abhinav)</button>
+  </div>
+
+  <h2>Mode breakdown</h2>
+  <table id="modeTable"></table>
 
   <div class="grid" id="kpis"></div>
 
@@ -299,6 +368,7 @@ small{font-size:11px;color:var(--muted)}
 
 <script>
 const $ = s => document.querySelector(s);
+let currentMode = 'all';
 function fmt(n){
   if(n==null||isNaN(n))return '—';
   n = +n;
@@ -322,7 +392,7 @@ function tbl(el, headers, rows){
 }
 
 async function load(){
-  const r = await fetch('/api/stats',{credentials:'include'});
+  const r = await fetch('/api/stats?mode='+encodeURIComponent(currentMode),{credentials:'include'});
   if(r.status===403){ document.cookie='rewire_admin=;Max-Age=0;path=/'; gate(); return; }
   const j = await r.json();
 
@@ -379,12 +449,21 @@ async function load(){
 
   // Recent feedback.
   tbl($('#feedback'),
-    ['When','Kind','Note','Country'],
+    ['When','Mode','Kind','Note','Country'],
     (j.recent_feedback||[]).map(f=>[
       '<span class="muted">'+timeAgo(f.ts)+'</span>',
+      '<span class="mode-pill '+(f.mode==='abhinav'?'abhinav':'')+'">'+htmlescape(f.mode||'direct')+'</span>',
       '<span class="kind-'+htmlescape(f.kind)+'">'+htmlescape(f.kind)+'</span>',
       htmlescape((f.text||'').slice(0,180)) || '<span class="muted">—</span>',
       htmlescape(f.country||'')
+    ]));
+
+  // Mode breakdown — independent of the active filter.
+  tbl($('#modeTable'),
+    ['Mode','Users','Sessions','Impressions','Likes','Events'],
+    (j.mode_breakdown||[]).map(m=>[
+      '<span class="mode-pill '+(m.mode==='abhinav'?'abhinav':'')+'">'+htmlescape(m.mode)+'</span>',
+      fmt(m.users), fmt(m.sessions), fmt(m.impressions), fmt(m.likes), fmt(m.events)
     ]));
 
   // Countries.
@@ -406,9 +485,10 @@ async function load(){
 
   // Users.
   tbl($('#users'),
-    ['Anon','Last seen','Events','Country','Device','Browser'],
+    ['Anon','Mode','Last seen','Events','Country','Device','Browser'],
     (j.recent_users||[]).map(u=>[
       '<code>'+htmlescape(u.anon_short)+'</code>',
+      '<span class="mode-pill '+(u.mode==='abhinav'?'abhinav':'')+'">'+htmlescape(u.mode||'direct')+'</span>',
       timeAgo(u.last_seen), fmt(u.events),
       htmlescape(u.country||''), htmlescape(u.device||''), htmlescape(u.browser||'')
     ]));
@@ -436,6 +516,14 @@ function gate(){
     const r = await fetch('/api/stats',{credentials:'include'});
     if(r.status===403){ gate(); return; }
     $('#app').style.display='block';
+    // Mode toggle bar.
+    document.querySelectorAll('#modeBar button').forEach(b=>{
+      b.onclick = ()=>{
+        currentMode = b.dataset.mode;
+        document.querySelectorAll('#modeBar button').forEach(x=>x.classList.toggle('active', x===b));
+        load();
+      };
+    });
     await load();
     setInterval(load, 30000);
   }catch(e){ gate(); }
