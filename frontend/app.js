@@ -4,7 +4,7 @@
 // v1.3.0: bigger Instagram-style stats badge, "+" FAB community entry,
 // full-modal premium sales-pitch (with bullet benefits), prominent UPI
 // deeplink CTA on /buy (avoids PhonePe gallery-QR security limits).
-window.REWIRE_VERSION = '1.3.2';
+window.REWIRE_VERSION = '1.3.3';
 console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
 (function () {
   'use strict';
@@ -336,6 +336,24 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
       }
       wrap.appendChild(el);
     });
+
+    // v1.3.3 — community pill INSIDE the endings stack, sitting under the
+    // 3 endings. Clean, full-width, dashed-outline. Replaces the v1.3.1
+    // right-rail circular FAB which kept covering the like counts.
+    const ccount0 = (m.community && m.community.length) || 0;
+    const pill = document.createElement('button');
+    pill.className = 'community-pill';
+    pill.type = 'button';
+    pill.setAttribute('aria-label', ccount0 + ' community endings — add yours');
+    pill.innerHTML = `<span class="plus">＋</span><span>Write your own ending</span>` +
+      (ccount0 > 0 ? `<span class="pill-count">${ccount0 > 99 ? '99+' : ccount0}</span>` : '');
+    pill.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openCommunitySheet(m);
+    });
+    wrap.appendChild(pill);
+
     card.appendChild(wrap);
 
     // VERY BOTTOM — Rewire brand chip
@@ -355,21 +373,6 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
       onFlagClick(m.id);
     });
     card.appendChild(flag);
-
-    // v1.3 community FAB — small "+" circular button, bottom-right corner.
-    // Doesn't overlap the endings stack (the v1.2 wide pill did).
-    const ccount = (m.community && m.community.length) || 0;
-    const fab = document.createElement('button');
-    fab.className = 'community-fab';
-    fab.setAttribute('aria-label', ccount + ' community endings — add yours');
-    fab.title = 'Community endings · add yours';
-    fab.innerHTML = `<span class="plus">+</span>` +
-      (ccount > 0 ? `<span class="badge">${ccount > 99 ? '99+' : ccount}</span>` : '');
-    fab.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      openCommunitySheet(m);
-    });
-    card.appendChild(fab);
 
     return card;
   }
@@ -702,19 +705,17 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
     const list = $('#communityList');
     list.innerHTML = '';
     const items = (m.community || []).slice().sort((a,b)=>(b.likes||0)-(a.likes||0) || (b.rating_n||0)-(a.rating_n||0));
-    if (!items.length) {
-      const empty = document.createElement('div');
-      empty.className = 'empty';
-      empty.textContent = 'No community endings yet — be the first ✨';
-      list.appendChild(empty);
-    } else {
-      for (const ce of items) list.appendChild(buildCommunityItem(ce));
-    }
-    $('#communityTitle').textContent = `Community endings — ${escapeHTML(m.title)}`;
+    // v1.3.3 — no more "No community endings yet — be the first" empty
+    // state. The list renders empty; the textarea below is the prompt.
+    for (const ce of items) list.appendChild(buildCommunityItem(ce));
+    $('#communityTitle').textContent = escapeHTML(m.title);
     $('#communityText').value = '';
     $('#communityAuthor').value = localStorage.getItem('rw_handle') || '';
     $('#communitySubmit').disabled = false;
     $('#communitySheet').classList.add('open');
+    // v1.3.3 — focus the textarea so the keyboard pops on mobile and the
+    // user can type immediately. setTimeout because the sheet animates in.
+    setTimeout(() => { try { $('#communityText').focus(); } catch (_) {} }, 250);
   }
   function closeCommunitySheet() {
     $('#communitySheet').classList.remove('open');
@@ -813,13 +814,13 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
       });
       // Re-render the list area inside the open sheet.
       openCommunitySheet(m);
-      // Update the FAB badge on the card.
-      $$(`.card[data-movie="${cssEscape(m.id)}"] .community-fab`).forEach(p => {
+      // v1.3.3: Update the bottom pill's count badge on the card.
+      $$(`.card[data-movie="${cssEscape(m.id)}"] .community-pill`).forEach(p => {
         const c = m.community.length;
-        const existingBadge = p.querySelector('.badge');
+        const existingBadge = p.querySelector('.pill-count');
         const txt = c > 99 ? '99+' : String(c);
         if (existingBadge) existingBadge.textContent = txt;
-        else if (c > 0) p.insertAdjacentHTML('beforeend', `<span class="badge">${txt}</span>`);
+        else if (c > 0) p.insertAdjacentHTML('beforeend', `<span class="pill-count">${txt}</span>`);
       });
       showToast('Posted ✨');
     } catch (e) {
@@ -966,15 +967,15 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
             ${conv > 0 ? `<span><em>⚡</em><b>${conv}%</b></span>` : ''}
           `;
         }
-        // Update community FAB badge
-        const fab = $('.community-fab', card);
-        if (fab) {
+        // v1.3.3: Update community pill badge (was: .community-fab).
+        const pill = $('.community-pill', card);
+        if (pill) {
           const c = (m.community || []).length;
-          const existingBadge = fab.querySelector('.badge');
+          const existingBadge = pill.querySelector('.pill-count');
           if (c > 0) {
             const txt = c > 99 ? '99+' : String(c);
             if (existingBadge) existingBadge.textContent = txt;
-            else fab.insertAdjacentHTML('beforeend', `<span class="badge">${txt}</span>`);
+            else pill.insertAdjacentHTML('beforeend', `<span class="pill-count">${txt}</span>`);
           } else if (existingBadge) {
             existingBadge.remove();
           }
@@ -983,4 +984,5 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
     } catch {}
   }, 60_000);
 })();
+
 
