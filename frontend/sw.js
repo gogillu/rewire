@@ -3,7 +3,7 @@
 // v9 (1.2.0): bumped to evict stale cached bundles from earlier v1.1 build.
 // Also we now ALWAYS network-first for HTML+JS so a missed bump doesn't pin
 // users to an old shell.
-const VERSION = 'rewire-v13';
+const VERSION = 'rewire-v14';
 const STATIC_CACHE = `${VERSION}-static`;
 const AUDIO_CACHE = `${VERSION}-audio`;
 
@@ -111,4 +111,5 @@ self.addEventListener('fetch', (event) => {
     }
   })());
 });
+
 

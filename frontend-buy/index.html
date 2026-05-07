@@ -238,50 +238,31 @@ a { color: #ff8a00; }
     <div style="text-align:center;margin-bottom:8px"><span class="status-pill">Step 2 of 2 · Pay & unlock</span></div>
     <p style="font-size:14px;line-height:1.45;margin:8px 0 14px;text-align:center">
       One-time <b>₹9</b> · lifetime access<br>
-      <span style="font-size:12px;opacity:.7">Order: <span id="orderRef"></span></span>
+      <span style="font-size:12px;opacity:.55">Order: <span id="orderRef"></span></span>
     </p>
 
-    <!-- PRIMARY: direct UPI deeplink — opens any UPI app with amount prefilled.
-         This bypasses PhonePe/GPay/Paytm "gallery QR" security limits which
-         flag scanned-from-screenshot QR codes (₹2,000 cap, extra OTP). -->
+    <!-- v1.3.4: PRIMARY — direct UPI deeplink. Mobile path: opens any UPI app
+         with amount prefilled. Desktop path: scan the QR below from your UPI
+         app's Scan-button (live scan; bypasses PhonePe's gallery-QR limits). -->
     <a class="btn" id="upiBtn" href="#" target="_blank" rel="noopener" style="font-size:16px;padding:18px;">
       📱 Pay ₹9 with UPI app
     </a>
-    <p class="muted" style="text-align:center;margin-top:6px;font-size:12px">
-      Opens PhonePe / GPay / Paytm / BHIM with amount prefilled.<br>
-      <span style="opacity:.7">No QR scan needed — no ₹2,000 limit.</span>
-    </p>
 
-    <button class="btn" id="claimBtn" style="margin-top:16px;background:linear-gradient(135deg,#22c55e,#16a34a);">
+    <!-- QR is now ALWAYS VISIBLE (not in a "More options" expander). On
+         desktop this is THE only way to pay; on mobile it's optional. -->
+    <p class="muted" style="text-align:center;margin:14px 0 6px;font-size:12px">
+      …or scan with any UPI app:
+    </p>
+    <div class="qr">
+      <img id="qrImg" src="" alt="UPI QR — ₹9 prefilled">
+    </div>
+
+    <button class="btn" id="claimBtn" style="margin-top:10px;background:linear-gradient(135deg,#22c55e,#16a34a);font-size:16px;padding:18px;">
       ✨ I've paid — unlock now
     </button>
 
-    <details id="moreOptions" style="margin-top:18px">
-      <summary class="muted" style="cursor:pointer;font-size:12.5px;text-align:center">More options (UPI ID, desktop QR, UTR)</summary>
-
-      <p style="font-size:13px;margin:14px 0 6px">Pay <b>₹9</b> manually to:</p>
-      <div class="upi-row">
-        <code id="vpa">7000189190@airtel</code>
-        <button class="copy" id="copyVpa">Copy</button>
-      </div>
-      <p class="muted" style="font-size:11.5px;margin-top:4px">Payee: Govind Choudhary · Note: Rewire Premium</p>
-
-      <p class="muted" style="text-align:center;margin-top:14px;font-size:12px">On a desktop? Open your UPI app, tap Scan, point at:</p>
-      <div class="qr">
-        <img id="qrImg" src="" alt="UPI QR — ₹9 prefilled">
-      </div>
-      <p class="muted" style="font-size:11px;text-align:center;opacity:.6">
-        ⚠ Saving this QR to gallery and re-scanning triggers the PhonePe ₹2,000 limit. Use the button above instead.
-      </p>
-
-      <div class="field" style="margin-top:14px">
-        <label for="utr" style="font-size:12px;opacity:.8">Have a UTR? (optional — helps verify faster)</label>
-        <input id="utr" type="text" autocomplete="off" placeholder="e.g. 4321987654321" maxlength="30">
-      </div>
-    </details>
-
-    <p class="muted" style="margin-top:14px;font-size:12px;line-height:1.5">
-      Your token is unlocked <b>instantly</b> and emailed to you. We verify against our bank statement within 24h. If the payment can't be matched, the token is revoked and you're notified by email.
+    <p class="muted" style="margin-top:14px;font-size:11.5px;line-height:1.5;text-align:center;opacity:.55">
+      Token unlocked instantly + emailed. We reconcile against bank statement within 24 h; mismatched payments are revoked + you're notified.
     </p>
   </section>
 
@@ -327,5 +308,6 @@ a { color: #ff8a00; }
 <script src="/buy/app.js"></script>
 </body>
 </html>
+
 
 

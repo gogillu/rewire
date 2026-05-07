@@ -90,7 +90,6 @@
       order = await r.json();
       localStorage.setItem('rw_buy_order', JSON.stringify(order));
       $('#orderRef').textContent = order.order_id;
-      $('#vpa').textContent = order.vpa;
       $('#upiBtn').href = order.deep_link;
       $('#qrImg').src = '/api/buy/qr?order_id=' + encodeURIComponent(order.order_id);
       track('buy_order_created', { extra: { order_id: order.order_id } });
@@ -131,31 +130,20 @@
   });
 
   // ---------- Step 2 — pay ----------
-  $('#copyVpa').addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText($('#vpa').textContent);
-      $('#copyVpa').textContent = 'Copied!';
-      setTimeout(() => { $('#copyVpa').textContent = 'Copy'; }, 1500);
-    } catch {}
-  });
+  // v1.3.4: Stripped UTR + copy-VPA chrome. Just two buttons + a QR.
   $('#upiBtn').addEventListener('click', () => track('buy_upi_app_clicked'));
 
   // v1.2: One-tap honor claim. Token is minted + emailed instantly; admin
-  // reconciles offline. Optional UTR (collapsed in <details>) helps verification.
+  // reconciles offline.
   $('#claimBtn').addEventListener('click', async () => {
     if (!order) { alert('Lost order context. Please refresh.'); return; }
-    let utr = ($('#utr')?.value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (utr && (utr.length < 10 || utr.length > 30)) {
-      alert('UTR must be 10–30 letters/digits, or leave it blank.');
-      return;
-    }
     $('#claimBtn').disabled = true;
     $('#claimBtn').textContent = 'Unlocking…';
-    track('buy_claim_clicked', { extra: { has_utr: utr ? 1 : 0 } });
+    track('buy_claim_clicked');
     try {
       const r = await fetch('/api/buy/claim', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_id: order.order_id, utr }),
+        body: JSON.stringify({ order_id: order.order_id, utr: '' }),
       });
       if (r.status === 409) {
         const txt = await r.text();
@@ -168,7 +156,6 @@
       }
       if (!r.ok) throw new Error(await r.text());
       const j = await r.json();
-      if (utr) localStorage.setItem('rw_buy_utr', utr);
       if (j.token) {
         localStorage.setItem('rw_premium_token', j.token);
         $('#tokenBox').textContent = j.token;
@@ -255,7 +242,6 @@
       }
       order = o;
       $('#orderRef').textContent = o.order_id;
-      $('#vpa').textContent = o.vpa;
       $('#upiBtn').href = o.deep_link;
       $('#qrImg').src = '/api/buy/qr?order_id=' + encodeURIComponent(o.order_id);
       // Check status — if already approved, skip directly to done.
