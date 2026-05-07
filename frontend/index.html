@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#000000">
-<meta name="rewire-version" content="1.3.0">
+<meta name="rewire-version" content="1.3.1">
 <title>Rewire — Alternate endings of Bollywood</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
@@ -207,14 +207,19 @@ html, body {
   font-size: 10px;
 }
 
-/* v1.3: community FAB — small "+" circular button, bottom-right corner.
-   Doesn't overlap the endings stack. Counts via small pink badge. */
+/* v1.3.1: community FAB — Instagram-Reels style right rail icon.
+   Positioned vertically centered on the right edge, well clear of:
+   - the audio/flag buttons at the top (top: ~14-46px from top)
+   - the endings stack at the bottom (starts ~210px from bottom)
+   - the brand chip (bottom: 14px)
+   Counts via small pink badge. */
 .community-fab {
   position: absolute;
   right: 14px;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 60px);
+  top: 50%;
+  transform: translateY(-50%);
   z-index: 5;
-  width: 44px; height: 44px;
+  width: 48px; height: 48px;
   border-radius: 50%;
   border: 1px solid rgba(255,255,255,.18);
   background: rgba(0,0,0,.55);
@@ -226,9 +231,9 @@ html, body {
   box-shadow: 0 6px 22px rgba(0,0,0,.45);
   transition: transform .15s ease;
 }
-.community-fab:active { transform: scale(.92); }
+.community-fab:active { transform: translateY(-50%) scale(.92); }
 .community-fab .plus {
-  font-size: 26px;
+  font-size: 28px;
   font-weight: 300;
   line-height: 1;
   margin-top: -2px;
@@ -246,6 +251,22 @@ html, body {
   letter-spacing: .2px;
   display: flex; align-items: center; justify-content: center;
   box-shadow: 0 2px 8px rgba(255,0,122,.45);
+}
+/* Tiny "Add ending" label below the icon, like Reels does for its rail */
+.community-fab::after {
+  content: "Add";
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.85);
+  text-shadow: 0 1px 4px rgba(0,0,0,.6);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 #communitySheet {
@@ -851,10 +872,10 @@ body.nudge-open { overflow: hidden; }
   </div>
 </div>
 
-<script src="/app.js?v=1.3.0"></script>
+<script src="/app.js?v=1.3.1"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=1.3.0').catch(()=>{});
+  navigator.serviceWorker.register('/sw.js?v=1.3.1').catch(()=>{});
 }
 </script>
 </body>
