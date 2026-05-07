@@ -1,9 +1,10 @@
 // Rewire frontend — vanilla JS. Random shuffle on every page load,
 // local /audio/<id>.mp3 playback (loop), persistent like history.
 //
-// v1.2.0: per-card stats overlay (Sagar feature) + community endings
-// (Abhinav feature) + premium nudge + flag UX.
-window.REWIRE_VERSION = '1.2.0';
+// v1.3.0: bigger Instagram-style stats badge, "+" FAB community entry,
+// full-modal premium sales-pitch (with bullet benefits), prominent UPI
+// deeplink CTA on /buy (avoids PhonePe gallery-QR security limits).
+window.REWIRE_VERSION = '1.3.0';
 console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
 (function () {
   'use strict';
@@ -290,7 +291,7 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
     vig.className = 'vignette';
     card.appendChild(vig);
 
-    // TOP — movie title + year + IMDb rating + v1.2 stats badge
+    // TOP — movie title + year + IMDb rating + v1.3 stats badge (Insta-bigger)
     const top = document.createElement('div');
     top.className = 'top';
     const views = m.views || 0;
@@ -301,9 +302,9 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
       <div class="title">${escapeHTML(m.title)}</div>
       <div class="sub">${m.year || ''} · ★ ${(m.imdb_rating || 0).toFixed(1)}</div>
       ${showStats ? `<div class="stats">
-        <span><em>👁</em>${formatLikes(views)}</span>
-        <span><em>❤</em>${formatLikes(likesTotal)}</span>
-        ${conv > 0 ? `<span><em>⚡</em>${conv}%</span>` : ''}
+        <span><em>👁</em><b>${formatLikes(views)}</b></span>
+        <span><em>❤</em><b>${formatLikes(likesTotal)}</b></span>
+        ${conv > 0 ? `<span><em>⚡</em><b>${conv}%</b></span>` : ''}
       </div>` : ''}
     `;
     card.appendChild(top);
@@ -355,18 +356,20 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
     });
     card.appendChild(flag);
 
-    // v1.2 community pill — collapsed entry point above the AI endings.
-    // Shown unconditionally so users can post even if the movie has 0
-    // community endings yet. Count text reflects the current list.
+    // v1.3 community FAB — small "+" circular button, bottom-right corner.
+    // Doesn't overlap the endings stack (the v1.2 wide pill did).
     const ccount = (m.community && m.community.length) || 0;
-    const pill = document.createElement('button');
-    pill.className = 'community-pill';
-    pill.innerHTML = `<span class="dot"></span> 💬 ${ccount} community ending${ccount===1?'':'s'} · add yours`;
-    pill.addEventListener('click', (ev) => {
+    const fab = document.createElement('button');
+    fab.className = 'community-fab';
+    fab.setAttribute('aria-label', ccount + ' community endings — add yours');
+    fab.title = 'Community endings · add yours';
+    fab.innerHTML = `<span class="plus">+</span>` +
+      (ccount > 0 ? `<span class="badge">${ccount > 99 ? '99+' : ccount}</span>` : '');
+    fab.addEventListener('click', (ev) => {
       ev.stopPropagation();
       openCommunitySheet(m);
     });
-    card.appendChild(pill);
+    card.appendChild(fab);
 
     return card;
   }
@@ -810,10 +813,13 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
       });
       // Re-render the list area inside the open sheet.
       openCommunitySheet(m);
-      // Update the pill count on the card.
-      $$(`.card[data-movie="${cssEscape(m.id)}"] .community-pill`).forEach(p => {
+      // Update the FAB badge on the card.
+      $$(`.card[data-movie="${cssEscape(m.id)}"] .community-fab`).forEach(p => {
         const c = m.community.length;
-        p.innerHTML = `<span class="dot"></span> 💬 ${c} community ending${c===1?'':'s'} · add yours`;
+        const existingBadge = p.querySelector('.badge');
+        const txt = c > 99 ? '99+' : String(c);
+        if (existingBadge) existingBadge.textContent = txt;
+        else if (c > 0) p.insertAdjacentHTML('beforeend', `<span class="badge">${txt}</span>`);
       });
       showToast('Posted ✨');
     } catch (e) {
@@ -846,12 +852,13 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
   }
 
   // ---------- Premium nudge ----------
-  // Free users get a banner inviting them to /buy after they've enjoyed
-  // the app for a while. Dismissible; re-shows after 30 more cards.
+  // v1.3: full-modal sales pitch (instead of v1.2 corner banner that
+  // covered the bottom ending). Shown after 8 cards first time, then
+  // every 25 cards. Dismissible with explicit "Maybe later".
   function maybeShowPremiumNudge() {
     if (localStorage.getItem('rw_premium_token')) return;  // already paid
-    const NUDGE_FIRST = 12;
-    const NUDGE_REPEAT = 30;
+    const NUDGE_FIRST = 8;
+    const NUDGE_REPEAT = 25;
     const dismissed = +(localStorage.getItem('rw_nudge_dismissed') || 0);
     const cardsAtDismiss = +(localStorage.getItem('rw_nudge_cards') || 0);
     const enough = state.cardsViewed >= NUDGE_FIRST &&
@@ -860,6 +867,7 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
     const el = $('#premiumNudge');
     if (!el || el.classList.contains('show')) return;
     el.classList.add('show');
+    document.body.classList.add('nudge-open');
     track('premium_nudge_shown', { extra: { cards: state.cardsViewed } });
   }
   function setupPremiumNudge() {
@@ -867,12 +875,19 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
       track('premium_buy_click');
       window.location.href = '/buy';
     });
-    $('#premiumClose').addEventListener('click', () => {
+    const closeNudge = () => {
       const el = $('#premiumNudge');
       el.classList.remove('show');
+      document.body.classList.remove('nudge-open');
       localStorage.setItem('rw_nudge_dismissed', String(Date.now()));
       localStorage.setItem('rw_nudge_cards', String(state.cardsViewed));
       track('premium_nudge_dismissed');
+    };
+    $('#premiumClose').addEventListener('click', closeNudge);
+    $('#premiumLater')?.addEventListener('click', closeNudge);
+    // Tap on backdrop closes too.
+    $('#premiumNudge').addEventListener('click', (e) => {
+      if (e.target.id === 'premiumNudge') closeNudge();
     });
   }
 
@@ -941,21 +956,28 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
           el.dataset.endingId = e.id;
           el.classList.toggle('liked', liked === e.id);
         });
-        // Update stats badge
+        // Update stats badge (v1.3 bigger format with <b>)
         const stats = $('.top .stats', card);
         if (stats) {
           const conv = m.conversion_pct || 0;
           stats.innerHTML = `
-            <span><em>👁</em>${formatLikes(m.views||0)}</span>
-            <span><em>❤</em>${formatLikes(m.likes_total||0)}</span>
-            ${conv > 0 ? `<span><em>⚡</em>${conv}%</span>` : ''}
+            <span><em>👁</em><b>${formatLikes(m.views||0)}</b></span>
+            <span><em>❤</em><b>${formatLikes(m.likes_total||0)}</b></span>
+            ${conv > 0 ? `<span><em>⚡</em><b>${conv}%</b></span>` : ''}
           `;
         }
-        // Update community pill count
-        const pill = $('.community-pill', card);
-        if (pill) {
+        // Update community FAB badge
+        const fab = $('.community-fab', card);
+        if (fab) {
           const c = (m.community || []).length;
-          pill.innerHTML = `<span class="dot"></span> 💬 ${c} community ending${c===1?'':'s'} · add yours`;
+          const existingBadge = fab.querySelector('.badge');
+          if (c > 0) {
+            const txt = c > 99 ? '99+' : String(c);
+            if (existingBadge) existingBadge.textContent = txt;
+            else fab.insertAdjacentHTML('beforeend', `<span class="badge">${txt}</span>`);
+          } else if (existingBadge) {
+            existingBadge.remove();
+          }
         }
       });
     } catch {}

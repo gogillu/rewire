@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#000000">
-<meta name="rewire-version" content="1.2.0">
+<meta name="rewire-version" content="1.3.0">
 <title>Rewire — Alternate endings of Bollywood</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
@@ -83,23 +83,25 @@ html, body {
   text-transform: uppercase;
   text-shadow: 0 1px 8px rgba(0,0,0,.7);
 }
-/* v1.2: per-card stats badge — views · likes · conversion% */
+/* v1.3: per-card stats badge — Instagram-style, bigger and bolder */
 .top .stats {
-  margin-top: 4px;
-  font-size: 10.5px;
-  opacity: .8;
-  letter-spacing: .8px;
-  display: inline-flex; gap: 10px;
-  background: rgba(0,0,0,.32);
-  border: 1px solid rgba(255,255,255,.08);
-  padding: 3px 10px;
+  margin-top: 8px;
+  font-size: 13px;
+  opacity: .96;
+  letter-spacing: .3px;
+  display: inline-flex; gap: 14px;
+  background: rgba(0,0,0,.42);
+  border: 1px solid rgba(255,255,255,.13);
+  padding: 6px 14px;
   border-radius: 999px;
-  text-shadow: 0 1px 4px rgba(0,0,0,.6);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  text-shadow: 0 1px 6px rgba(0,0,0,.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-weight: 500;
 }
-.top .stats span { white-space: nowrap; }
-.top .stats em { font-style: normal; opacity: .55; margin-right: 2px; }
+.top .stats span { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.top .stats em { font-style: normal; opacity: .65; font-size: 13px; }
+.top .stats b { font-weight: 700; }
 
 /* BOTTOM — three endings stacked just above brand */
 .endings {
@@ -205,30 +207,46 @@ html, body {
   font-size: 10px;
 }
 
-/* v1.2: community endings — collapsed pill above the AI endings.
-   Tap to expand a sheet showing community submissions + 5-star rating. */
-.community-pill {
+/* v1.3: community FAB — small "+" circular button, bottom-right corner.
+   Doesn't overlap the endings stack. Counts via small pink badge. */
+.community-fab {
   position: absolute;
-  left: 50%;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 244px);
-  transform: translateX(-50%);
-  z-index: 4;
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: rgba(0,0,0,.36);
-  border: 1px solid rgba(255,255,255,.10);
-  color: rgba(255,255,255,.85);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .4px;
+  right: 14px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 60px);
+  z-index: 5;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(0,0,0,.55);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+          backdrop-filter: blur(14px) saturate(150%);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
   cursor: pointer;
-  -webkit-backdrop-filter: blur(10px);
-          backdrop-filter: blur(10px);
-  text-shadow: 0 1px 4px rgba(0,0,0,.6);
+  box-shadow: 0 6px 22px rgba(0,0,0,.45);
+  transition: transform .15s ease;
 }
-.community-pill:active { transform: translateX(-50%) scale(.96); }
-.community-pill .dot { width: 5px; height: 5px; border-radius: 50%; background: #ff007a; }
+.community-fab:active { transform: scale(.92); }
+.community-fab .plus {
+  font-size: 26px;
+  font-weight: 300;
+  line-height: 1;
+  margin-top: -2px;
+}
+.community-fab .badge {
+  position: absolute;
+  top: -4px; right: -4px;
+  min-width: 20px; height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff007a, #ff8a00);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .2px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(255,0,122,.45);
+}
 
 #communitySheet {
   position: fixed; inset: 0;
@@ -561,41 +579,143 @@ html, body {
   cursor: pointer;
 }
 
-/* Premium nudge banner — slides in after N cards */
+/* v1.3: Premium sales-pitch modal (replaces v1.2 corner banner that
+   covered the third ending). Full-screen blur backdrop + centered card
+   with bullet-point benefits and a big CTA. */
 #premiumNudge {
-  position: fixed;
-  left: 50%;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 90px);
-  transform: translate(-50%, 24px);
-  width: min(94vw, 420px);
-  z-index: 90;
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: linear-gradient(135deg, rgba(255,138,0,.95), rgba(255,0,122,.95) 60%, rgba(74,0,224,.95));
-  color: #fff;
-  display: flex; align-items: center; gap: 12px;
-  box-shadow: 0 14px 50px rgba(255,0,122,.35);
-  opacity: 0; pointer-events: none;
-  transition: opacity .35s ease, transform .35s ease;
+  position: fixed; inset: 0;
+  z-index: 230;
+  display: none;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,.72);
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  padding: 18px;
+  opacity: 0;
+  transition: opacity .25s ease;
 }
-#premiumNudge.show { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
-#premiumNudge .body { flex: 1; min-width: 0; }
-#premiumNudge .ttl { font-weight: 800; font-size: 14px; letter-spacing: .2px; }
-#premiumNudge .sub { font-size: 11px; opacity: .9; margin-top: 2px; letter-spacing: .3px; }
-#premiumNudge .cta {
-  background: rgba(0,0,0,.25);
+#premiumNudge.show { display: flex; opacity: 1; }
+#premiumNudge .pitch {
+  width: 100%;
+  max-width: 420px;
+  background: linear-gradient(160deg, #1d0033 0%, #2a0033 50%, #1a0a18 100%);
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 24px;
+  padding: 24px 22px 20px;
   color: #fff;
-  border: 1px solid rgba(255,255,255,.5);
-  border-radius: 999px;
-  padding: 8px 14px;
-  font-weight: 800; font-size: 13px; letter-spacing: .4px;
-  cursor: pointer;
-  white-space: nowrap;
+  box-shadow: 0 24px 80px rgba(255,0,122,.35), 0 0 0 1px rgba(255,138,0,.2);
+  position: relative;
+  animation: nudgeIn .35s cubic-bezier(.2,.9,.3,1.1);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+@keyframes nudgeIn {
+  0% { transform: translateY(20px) scale(.96); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
 }
 #premiumNudge .x {
-  background: transparent; border: 0; color: rgba(255,255,255,.7);
-  font-size: 16px; line-height: 1; cursor: pointer; padding: 4px 4px 4px 8px;
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 32px; height: 32px;
+  background: rgba(255,255,255,.08);
+  border: 0; border-radius: 50%;
+  color: #fff; font-size: 18px; line-height: 1;
+  cursor: pointer;
 }
+#premiumNudge .pitch h2 {
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: .3px;
+  margin: 0 0 4px;
+  background-image: linear-gradient(90deg, #ff8a00, #ff007a 50%, #b14eff);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+#premiumNudge .tag {
+  font-size: 12px;
+  opacity: .7;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+#premiumNudge ul.bullets {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 18px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+#premiumNudge ul.bullets li {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+#premiumNudge ul.bullets li .icn {
+  font-size: 18px;
+  flex-shrink: 0;
+  width: 26px; text-align: center;
+}
+#premiumNudge ul.bullets li b {
+  font-weight: 700;
+  display: block;
+  margin-bottom: 1px;
+  font-size: 13.5px;
+}
+#premiumNudge ul.bullets li span {
+  opacity: .78;
+  font-size: 12px;
+}
+#premiumNudge .price {
+  text-align: center;
+  margin: 6px 0 12px;
+  font-size: 13px;
+  opacity: .8;
+}
+#premiumNudge .price b {
+  font-size: 22px;
+  font-weight: 900;
+  background-image: linear-gradient(90deg, #ff8a00, #ff007a 60%);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: .5px;
+}
+#premiumNudge .price s {
+  margin-left: 8px;
+  opacity: .5;
+}
+#premiumNudge .cta {
+  display: block;
+  width: 100%;
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 0;
+  background-image: linear-gradient(135deg, #ff8a00, #ff007a 60%, #8e2de2);
+  color: #fff;
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: .4px;
+  cursor: pointer;
+  box-shadow: 0 8px 30px rgba(255,0,122,.45);
+}
+#premiumNudge .cta:active { transform: scale(.98); }
+#premiumNudge .later {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  background: transparent;
+  border: 0;
+  color: rgba(255,255,255,.55);
+  font-size: 12.5px;
+  cursor: pointer;
+  letter-spacing: .3px;
+}
+body.nudge-open { overflow: hidden; }
 
 #splash {
   position: fixed; inset: 0;
@@ -697,20 +817,44 @@ html, body {
   </div>
 </div>
 
-<!-- Premium nudge banner -->
-<div id="premiumNudge">
-  <div class="body">
-    <div class="ttl">Unlock Rewire Premium ✨</div>
-    <div class="sub">Intense Mode · Leaderboard · ₹9 lifetime</div>
+<!-- v1.3 Premium sales-pitch modal -->
+<div id="premiumNudge" role="dialog" aria-modal="true" aria-label="Unlock Rewire Premium">
+  <div class="pitch">
+    <button class="x" id="premiumClose" aria-label="Close">×</button>
+    <h2>Unlock Rewire Premium ✨</h2>
+    <div class="tag">Lifetime · One-time ₹9</div>
+    <ul class="bullets">
+      <li>
+        <span class="icn">🔥</span>
+        <div><b>Intense Mode</b><span>Pick your dial — extreme humour, sad, controversial, impossible. The kind of endings that hit harder.</span></div>
+      </li>
+      <li>
+        <span class="icn">🌍</span>
+        <div><b>Hollywood &amp; TV Series</b><span>500+ extra titles — Oppenheimer, Breaking Bad, Squid Game, Inception. Bollywood plus the world.</span></div>
+      </li>
+      <li>
+        <span class="icn">🏆</span>
+        <div><b>Endings Leaderboard</b><span>See which alternate endings the world is loving most. Top of the charts, daily.</span></div>
+      </li>
+      <li>
+        <span class="icn">🎯</span>
+        <div><b>Custom Preferences</b><span>Tune the algorithm — favour humour, lean emotional, skip controversial. Your taste, your feed.</span></div>
+      </li>
+      <li>
+        <span class="icn">🎵</span>
+        <div><b>Curated Catchier Songs</b><span>Hand-picked iconic beats per movie — full library, instantly cached.</span></div>
+      </li>
+    </ul>
+    <div class="price"><b>₹9 once</b><s>₹99/year</s> · lifetime access</div>
+    <button class="cta" id="premiumGo">Unlock for ₹9 →</button>
+    <button class="later" id="premiumLater">Maybe later</button>
   </div>
-  <button class="cta" id="premiumGo">Get</button>
-  <button class="x" id="premiumClose" aria-label="Close">×</button>
 </div>
 
-<script src="/app.js?v=1.2.0"></script>
+<script src="/app.js?v=1.3.0"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=1.2.0').catch(()=>{});
+  navigator.serviceWorker.register('/sw.js?v=1.3.0').catch(()=>{});
 }
 </script>
 </body>
