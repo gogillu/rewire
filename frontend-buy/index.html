@@ -229,7 +229,12 @@ a { color: #ff8a00; }
       <label for="email2">Confirm email</label>
       <input id="email2" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required>
     </div>
-    <button class="btn" id="goPay">Continue to UPI payment →</button>
+    <div class="field">
+      <label for="phone">Phone <span style="opacity:.55;font-weight:400">(optional · skips a step in payment)</span></label>
+      <input id="phone" type="tel" autocomplete="tel" inputmode="numeric" maxlength="10" placeholder="98xxxxxxxx">
+      <div class="note" style="opacity:.55">Used only to prefill the Razorpay payment sheet. Not stored.</div>
+    </div>
+    <button class="btn" id="goPay">Continue to payment →</button>
     <div class="small-link">
       Already paid? <a href="#" id="recoverLink">Recover token</a>
     </div>
@@ -242,6 +247,26 @@ a { color: #ff8a00; }
       One-time <b>₹9</b> · lifetime access<br>
       <span style="font-size:12px;opacity:.55">Order: <span id="orderRef"></span></span>
     </p>
+
+    <!-- v1.4.2: Razorpay account is in test mode + under review, so UPI
+         tile is gated. Make the working path (test card) obvious so users
+         can validate the flow now instead of staring at "Enter mobile". -->
+    <div id="testModeHint" style="display:none;margin:6px 0 14px;padding:14px 16px;border-radius:14px;background:rgba(255,138,0,.10);border:1px solid rgba(255,138,0,.35);font-size:13px;line-height:1.5">
+      <div style="font-weight:700;margin-bottom:6px;color:#ffb066">🧪 Test mode — no real money</div>
+      <div style="opacity:.85;margin-bottom:8px">After tapping <b>⚡ Pay ₹9</b> below, you'll see Razorpay's payment sheet:</div>
+      <ol style="margin:0;padding-left:20px;line-height:1.7">
+        <li>It asks for phone first → tap <b>Continue</b> (auto-filled)</li>
+        <li>Pick <b>Cards</b> tile (UPI is locked while account is in review)</li>
+        <li>Use these test details:
+          <div style="margin-top:6px;padding:10px 12px;border-radius:10px;background:rgba(0,0,0,.30);font-family:'SF Mono','Cascadia Mono',monospace;font-size:12.5px;line-height:1.7">
+            Card: <b>4111 1111 1111 1111</b><br>
+            Expiry: <b>12/30</b> · CVV: <b>123</b><br>
+            OTP: <b>1234</b>
+          </div>
+        </li>
+        <li>Token unlocks automatically + emailed to you</li>
+      </ol>
+    </div>
 
     <!-- v1.4.0: PRIMARY = Razorpay checkout (real tap-and-pay UPI; opens
          PhonePe / GPay / Paytm with merchant identity verified, no security
@@ -316,7 +341,7 @@ a { color: #ff8a00; }
     <div class="small-link"><a href="#" id="backFromRecover">← back</a></div>
   </section>
 </div>
-<script src="/buy/app.js?v=1.4.1"></script>
+<script src="/buy/app.js?v=1.4.2"></script>
 </body>
 </html>
 

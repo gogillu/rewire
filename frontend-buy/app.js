@@ -89,6 +89,10 @@
       if (!r.ok) throw new Error(await r.text());
       order = await r.json();
       order.email = e1; // remember for Razorpay prefill
+      // v1.4.2: capture optional phone to skip Razorpay's contact step.
+      // Razorpay expects 10-digit only; the +91 prefix is added by the widget itself.
+      const phoneRaw = ($('#phone') && $('#phone').value || '').replace(/\D/g, '');
+      if (/^[6-9]\d{9}$/.test(phoneRaw)) order.contact = phoneRaw;
       localStorage.setItem('rw_buy_order', JSON.stringify(order));
       $('#orderRef').textContent = order.order_id;
       $('#upiBtn').href = order.deep_link;
@@ -99,7 +103,7 @@
       alert('Could not start order: ' + (err.message || err));
     } finally {
       $('#goPay').disabled = false;
-      $('#goPay').textContent = 'Continue to UPI payment →';
+      $('#goPay').textContent = 'Continue to payment →';
     }
   });
 
@@ -144,6 +148,11 @@
       RZP_KEY_ID = j.rzp_key_id;
       const fb = $('#fallbackPay');
       if (fb) fb.style.display = 'none';
+      // v1.4.2: surface test-mode hint when running on a test key.
+      if (/^rzp_test_/.test(j.rzp_key_id)) {
+        const hint = $('#testModeHint');
+        if (hint) hint.style.display = 'block';
+      }
     } else {
       const fb = $('#fallbackPay');
       if (fb) fb.style.display = 'block';
@@ -191,7 +200,10 @@
         order_id: j.rzp_order_id,
         name: 'Rewire',
         description: 'Premium · Lifetime',
-        prefill: { email: (order && order.email) || '' },
+        prefill: {
+          email: (order && order.email) || '',
+          contact: (order && order.contact) || '',
+        },
         theme: { color: '#ff007a' },
         // v1.4.1: Drop the `method: { upi: true, card: false, ... }`
         // restriction. In Razorpay test mode (especially on desktop, where
