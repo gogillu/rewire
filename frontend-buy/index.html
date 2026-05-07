@@ -248,49 +248,39 @@ a { color: #ff8a00; }
       <span style="font-size:12px;opacity:.55">Order: <span id="orderRef"></span></span>
     </p>
 
-    <!-- v1.4.2: Razorpay account is in test mode + under review, so UPI
-         tile is gated. Make the working path (test card) obvious so users
-         can validate the flow now instead of staring at "Enter mobile". -->
-    <div id="testModeHint" style="display:none;margin:6px 0 14px;padding:14px 16px;border-radius:14px;background:rgba(255,138,0,.10);border:1px solid rgba(255,138,0,.35);font-size:13px;line-height:1.5">
-      <div style="font-weight:700;margin-bottom:6px;color:#ffb066">🧪 Test mode — no real money</div>
-      <div style="opacity:.85;margin-bottom:8px">After tapping <b>⚡ Pay ₹9</b> below, you'll see Razorpay's payment sheet:</div>
-      <ol style="margin:0;padding-left:20px;line-height:1.7">
-        <li>It asks for phone first → tap <b>Continue</b> (auto-filled)</li>
-        <li>Pick <b>Cards</b> tile (UPI is locked while account is in review)</li>
-        <li>Use these test details:
-          <div style="margin-top:6px;padding:10px 12px;border-radius:10px;background:rgba(0,0,0,.30);font-family:'SF Mono','Cascadia Mono',monospace;font-size:12.5px;line-height:1.7">
-            Card: <b>4111 1111 1111 1111</b><br>
-            Expiry: <b>12/30</b> · CVV: <b>123</b><br>
-            OTP: <b>1234</b>
-          </div>
-        </li>
-        <li>Token unlocks automatically + emailed to you</li>
-      </ol>
+    <!-- v1.4.4: Test-mode hint. Razorpay account is in review → UPI gated,
+         and even card tile is intermittently rejected ("No appropriate
+         payment method found"). Tell the user up-front to use the green
+         Simulate button below. -->
+    <div id="testModeHint" style="display:none;margin:6px 0 14px;padding:14px 16px;border-radius:14px;background:rgba(16,185,129,.10);border:1px solid rgba(16,185,129,.40);font-size:13.5px;line-height:1.55">
+      <div style="font-weight:700;margin-bottom:6px;color:#34d399">🧪 Test mode — no real money</div>
+      <div style="opacity:.88">
+        Razorpay's UPI is locked while the merchant account is under review,
+        and their card sheet is currently throwing
+        <i>“No appropriate payment method found.”</i>
+        Use the <b>green button below</b> to mint a real lifetime token via
+        the test path — same backend, same email, same unlock flow.
+      </div>
     </div>
 
-    <!-- v1.4.0: PRIMARY = Razorpay checkout (real tap-and-pay UPI; opens
-         PhonePe / GPay / Paytm with merchant identity verified, no security
-         warnings, no ₹2,000 cap). On success the token is auto-issued — no
-         "I've paid" claim button needed. -->
+    <!-- v1.4.4: Test-mode simulate button is the PRIMARY CTA when running on
+         a test key. JS in app.js promotes/demotes once /api/version returns
+         the key prefix. Live keys keep the blue button as primary. -->
+    <button class="btn" id="rzpSimulateBtn" style="display:none;font-size:17px;padding:20px;background:linear-gradient(135deg,#10b981,#059669);">
+      🧪 Simulate test payment — instant unlock
+    </button>
+    <p class="muted" id="rzpSimulateNote" style="display:none;text-align:center;margin-top:6px;font-size:12px;opacity:.7">
+      Test-mode shortcut · mints a real lifetime token in your local DB. Email enqueued. No real payment.
+    </p>
+
+    <!-- v1.4.0: Razorpay checkout. PRIMARY on live keys. In test mode JS
+         demotes this to a small fallback link below the green simulate
+         button, since the merchant account is under review and the sheet
+         currently rejects all methods. -->
     <button class="btn" id="rzpBtn" style="font-size:17px;padding:20px;background:linear-gradient(135deg,#3399ff,#0066ff);">
       ⚡ Pay ₹9 — instant unlock
     </button>
-    <p class="muted" style="text-align:center;margin-top:6px;font-size:12px;opacity:.7">
-      Secure UPI payment · token unlocked + emailed automatically
-    </p>
-
-    <!-- v1.4.3: Test-mode simulate button. Visible ONLY when /api/version
-         returns rzp_test_*. Synthesizes a valid HMAC server-side and runs
-         the same verify path as a real payment, so you can exercise the
-         token-mint + email + premium-unlock flow end-to-end without
-         touching Razorpay's UI. -->
-    <button class="btn" id="rzpSimulateBtn" style="display:none;margin-top:14px;font-size:15px;padding:16px;background:linear-gradient(135deg,#10b981,#059669);">
-      🧪 Simulate test payment (skip Razorpay sheet)
-    </button>
-    <p class="muted" id="rzpSimulateNote" style="display:none;text-align:center;margin-top:6px;font-size:11.5px;opacity:.6">
-      Test-mode shortcut · mints a real lifetime token in your local DB. Email enqueued. No real payment.
-    </p>
-    <p class="muted" style="text-align:center;margin-top:6px;font-size:12px;opacity:.7">
+    <p class="muted" id="rzpBtnNote" style="text-align:center;margin-top:6px;font-size:12px;opacity:.7">
       Secure UPI payment · token unlocked + emailed automatically
     </p>
 
@@ -356,7 +346,7 @@ a { color: #ff8a00; }
     <div class="small-link"><a href="#" id="backFromRecover">← back</a></div>
   </section>
 </div>
-<script src="/buy/app.js?v=1.4.3"></script>
+<script src="/buy/app.js?v=1.4.4"></script>
 </body>
 </html>
 

@@ -148,15 +148,29 @@
       RZP_KEY_ID = j.rzp_key_id;
       const fb = $('#fallbackPay');
       if (fb) fb.style.display = 'none';
-      // v1.4.2: surface test-mode hint when running on a test key.
+      // v1.4.4: in test mode, demote the (broken) Razorpay button and
+      // promote the green simulate button to primary. Reveal the test hint.
       if (/^rzp_test_/.test(j.rzp_key_id)) {
         const hint = $('#testModeHint');
         if (hint) hint.style.display = 'block';
-        // v1.4.3: also reveal the green "Simulate" button.
-        const sim = $('#rzpSimulateBtn');
+        const sim  = $('#rzpSimulateBtn');
         const note = $('#rzpSimulateNote');
+        const blue = $('#rzpBtn');
+        const blueNote = $('#rzpBtnNote');
         if (sim)  sim.style.display  = 'block';
         if (note) note.style.display = 'block';
+        if (blue) {
+          // Shrink + relabel; keep functional in case Razorpay sheet
+          // recovers, but make it visually a fallback.
+          blue.style.fontSize = '13.5px';
+          blue.style.padding = '12px';
+          blue.style.opacity = '0.55';
+          blue.style.marginTop = '14px';
+          blue.style.background = 'rgba(255,255,255,0.06)';
+          blue.style.border = '1px solid rgba(255,255,255,0.12)';
+          blue.textContent = '🔵 Try Razorpay sheet (may fail in test mode)';
+        }
+        if (blueNote) blueNote.style.display = 'none';
       }
     } else {
       const fb = $('#fallbackPay');
