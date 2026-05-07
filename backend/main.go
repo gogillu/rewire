@@ -231,6 +231,7 @@ func main() {
 	mux.HandleFunc("POST /api/buy/rzp-order", srv.handleBuyRzpOrder)     // v1.4.0: razorpay
 	mux.HandleFunc("POST /api/buy/rzp-verify", srv.handleBuyRzpVerify)   // v1.4.0
 	mux.HandleFunc("POST /api/buy/rzp-webhook", srv.handleBuyRzpWebhook) // v1.4.0
+	mux.HandleFunc("POST /api/buy/rzp-test-simulate", srv.handleBuyRzpTestSimulate) // v1.4.3: test-mode only
 	mux.Handle("GET /buy", srv.handleBuyFrontend())
 	mux.Handle("GET /buy/", srv.handleBuyFrontend())
 
@@ -301,7 +302,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // /api/version (JSON) and embedded in /api/movies app_version. We bump this
 // at every shipped release so users / debug tools can see what's actually
 // deployed (per rubber-duck #10).
-const appBuildVersion = "1.4.2"
+const appBuildVersion = "1.4.3"
 
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")

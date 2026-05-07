@@ -30,6 +30,7 @@ package main
 import (
 	"bytes"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -438,4 +439,153 @@ func (s *Server) migrateRzpColumns() {
 			_ = err
 		}
 	}
+}
+
+// ---------- POST /api/buy/rzp-test-simulate ----------
+//
+// v1.4.3: Test-mode-only endpoint that simulates a successful Razorpay
+// payment by synthesizing a valid HMAC-SHA256 signature from the configured
+// secret + a fake payment_id, then invokes the same verify path that the
+// production handler uses. This unblocks end-to-end testing of the
+// premium-unlock flow (token mint, email enqueue, status=approved) while
+// the merchant's real UPI activation is pending.
+//
+// SAFETY: hard-gated to keys starting with `rzp_test_`. Refuses on live
+// keys (rzp_live_*). Without this guard, simulating a payment in
+// production would let anyone mint free premium tokens.
+func (s *Server) handleBuyRzpTestSimulate(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !rzpEnabled() {
+		http.Error(w, "razorpay not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if !strings.HasPrefix(rzpKeyID(), "rzp_test_") {
+		http.Error(w, "simulation refused: this endpoint only works with rzp_test_* keys", http.StatusForbidden)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4*1024)
+	var b rzpOrderReqBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	b.OrderID = strings.TrimSpace(b.OrderID)
+	if b.OrderID == "" {
+		http.Error(w, "order_id required", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch the local order. Need rzp_order_id (caller must have already
+	// hit /api/buy/rzp-order to bind one) + email for the verify pass.
+	var rzpOrderID, email, status string
+	err := s.db.QueryRowContext(r.Context(), `
+        SELECT COALESCE(rzp_order_id,''), email, status FROM payment_orders WHERE order_id = ?
+    `, b.OrderID).Scan(&rzpOrderID, &email, &status)
+	if err != nil {
+		http.Error(w, "order not found", http.StatusNotFound)
+		return
+	}
+	if rzpOrderID == "" {
+		http.Error(w, "no rzp_order_id bound — call /api/buy/rzp-order first", http.StatusConflict)
+		return
+	}
+
+	// Synthesize: pay_TEST<random14> + valid HMAC over rzp_order_id|pay_id.
+	pidBuf := make([]byte, 7)
+	_, _ = rand.Read(pidBuf)
+	fakePaymentID := "pay_TEST" + strings.ToUpper(hex.EncodeToString(pidBuf))
+	mac := hmac.New(sha256.New, []byte(rzpKeySecret()))
+	mac.Write([]byte(rzpOrderID + "|" + fakePaymentID))
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	// Re-issue the verify call against ourselves (in-process, no HTTP).
+	// Easiest: marshal a synthetic body and reuse handleBuyRzpVerify by
+	// constructing a fresh request. But that double-decodes JSON — cleaner
+	// is to extract verify into a helper. Inline it here instead, reusing
+	// the same idempotent BEGIN IMMEDIATE pattern.
+	now := time.Now().UnixMilli()
+	ctx := r.Context()
+
+	if status == "approved" {
+		// Already paid — return existing token if we have it.
+		var raw string
+		_ = s.db.QueryRowContext(ctx,
+			`SELECT raw_token FROM issued_tokens WHERE order_id = ? LIMIT 1`,
+			b.OrderID).Scan(&raw)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "simulated": true, "status": "approved", "token": raw, "email": email,
+			"rzp_payment_id": fakePaymentID, "rzp_signature": sig,
+		})
+		return
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+	_, _ = tx.ExecContext(ctx, `BEGIN IMMEDIATE`)
+
+	raw, hash, err := s.mintToken()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if _, err := tx.ExecContext(ctx, `
+        INSERT INTO premium_tokens (token_hash, email, order_id, issued_at)
+        VALUES (?, ?, ?, ?)
+    `, hash, email, b.OrderID, now); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	utrKey := "RZP-SIM-" + fakePaymentID
+	if _, err := tx.ExecContext(ctx, `
+        INSERT OR REPLACE INTO issued_tokens (order_id, utr, raw_token, created_at)
+        VALUES (?, ?, ?, ?)
+    `, b.OrderID, utrKey, raw, now); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if _, err := tx.ExecContext(ctx, `
+        UPDATE payment_orders
+        SET status='approved',
+            utr=?, token_hash=?, rzp_order_id=?, rzp_payment_id=?, rzp_signature=?,
+            reviewer_note=COALESCE(reviewer_note,'') || ' [TEST-MODE simulated payment]',
+            updated_at=?, approved_at=?
+        WHERE order_id=?
+    `, utrKey, hash, rzpOrderID, fakePaymentID, sig, now, now, b.OrderID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	subject := "[TEST] Your Rewire Premium token (simulated payment)"
+	html := fmt.Sprintf(
+		`<div style="font-family:system-ui,sans-serif;max-width:540px;margin:0 auto;padding:24px">
+		   <h2 style="margin:0 0 12px">Welcome to Rewire Premium ✨ (test)</h2>
+		   <p style="background:#fef3c7;color:#92400e;padding:8px 12px;border-radius:6px;font-size:13px">
+		     This token was issued via a TEST-MODE simulated payment. No money was charged. It will work for unlocking premium until the test database is cleared.
+		   </p>
+		   <p>Order: <code>%s</code></p>
+		   <pre style="background:#111;color:#fff;padding:14px;border-radius:8px;overflow:auto;font-size:13px">%s</pre>
+		 </div>`,
+		b.OrderID, raw)
+	if _, err := tx.ExecContext(ctx, `
+        INSERT INTO email_outbox (kind, order_id, to_addr, subject, html, next_attempt_at, created_at)
+        VALUES ('token', ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(kind, order_id) WHERE order_id IS NOT NULL DO UPDATE SET
+            to_addr=excluded.to_addr, subject=excluded.subject, html=excluded.html,
+            status='pending', attempts=0, next_attempt_at=excluded.next_attempt_at
+    `, b.OrderID, email, subject, html, now, now); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "simulated": true, "status": "approved",
+		"token": raw, "email": email,
+		"rzp_payment_id": fakePaymentID, "rzp_signature": sig,
+	})
 }

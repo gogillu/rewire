@@ -152,6 +152,11 @@
       if (/^rzp_test_/.test(j.rzp_key_id)) {
         const hint = $('#testModeHint');
         if (hint) hint.style.display = 'block';
+        // v1.4.3: also reveal the green "Simulate" button.
+        const sim = $('#rzpSimulateBtn');
+        const note = $('#rzpSimulateNote');
+        if (sim)  sim.style.display  = 'block';
+        if (note) note.style.display = 'block';
       }
     } else {
       const fb = $('#fallbackPay');
@@ -268,6 +273,46 @@
       $('#rzpBtn').textContent = '⚡ Pay ₹9 — instant unlock';
       const fb = $('#fallbackPay');
       if (fb) fb.style.display = 'block';
+    }
+  });
+
+  // v1.4.3: Test-mode simulate button. Synthesizes a valid HMAC server-side
+  // and runs the full verify path. Mints a real lifetime token; refuses on
+  // live keys server-side. Lets the user exercise end-to-end token issuance
+  // without depending on Razorpay's UPI activation.
+  $('#rzpSimulateBtn').addEventListener('click', async () => {
+    if (!order) { alert('Lost order context. Please refresh.'); return; }
+    const sim = $('#rzpSimulateBtn');
+    sim.disabled = true;
+    sim.textContent = 'Simulating…';
+    track('buy_rzp_simulate_clicked');
+    try {
+      // First, ensure an rzp_order_id is bound to the local order.
+      const ro = await fetch('/api/buy/rzp-order', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: order.order_id }),
+      });
+      if (!ro.ok) throw new Error('rzp-order: ' + (await ro.text()));
+      // Now run the simulate.
+      const r = await fetch('/api/buy/rzp-test-simulate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: order.order_id }),
+      });
+      if (!r.ok) throw new Error('simulate: ' + (await r.text()));
+      const j = await r.json();
+      if (j.token) {
+        localStorage.setItem('rw_premium_token', j.token);
+        $('#tokenBox').textContent = j.token;
+        track('buy_token_unlocked');
+        show('done');
+      } else {
+        throw new Error('no token in response');
+      }
+    } catch (err) {
+      alert('Simulation failed: ' + (err.message || err));
+    } finally {
+      sim.disabled = false;
+      sim.textContent = '🧪 Simulate test payment (skip Razorpay sheet)';
     }
   });
 

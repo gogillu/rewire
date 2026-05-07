@@ -279,6 +279,21 @@ a { color: #ff8a00; }
       Secure UPI payment · token unlocked + emailed automatically
     </p>
 
+    <!-- v1.4.3: Test-mode simulate button. Visible ONLY when /api/version
+         returns rzp_test_*. Synthesizes a valid HMAC server-side and runs
+         the same verify path as a real payment, so you can exercise the
+         token-mint + email + premium-unlock flow end-to-end without
+         touching Razorpay's UI. -->
+    <button class="btn" id="rzpSimulateBtn" style="display:none;margin-top:14px;font-size:15px;padding:16px;background:linear-gradient(135deg,#10b981,#059669);">
+      🧪 Simulate test payment (skip Razorpay sheet)
+    </button>
+    <p class="muted" id="rzpSimulateNote" style="display:none;text-align:center;margin-top:6px;font-size:11.5px;opacity:.6">
+      Test-mode shortcut · mints a real lifetime token in your local DB. Email enqueued. No real payment.
+    </p>
+    <p class="muted" style="text-align:center;margin-top:6px;font-size:12px;opacity:.7">
+      Secure UPI payment · token unlocked + emailed automatically
+    </p>
+
     <!-- FALLBACK row, only shown when Razorpay isn't configured. The
          existing direct-deeplink + manual claim flow stays intact for
          self-host. -->
@@ -341,7 +356,7 @@ a { color: #ff8a00; }
     <div class="small-link"><a href="#" id="backFromRecover">← back</a></div>
   </section>
 </div>
-<script src="/buy/app.js?v=1.4.2"></script>
+<script src="/buy/app.js?v=1.4.3"></script>
 </body>
 </html>
 
