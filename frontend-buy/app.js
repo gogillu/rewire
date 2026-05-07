@@ -193,7 +193,14 @@
         description: 'Premium · Lifetime',
         prefill: { email: (order && order.email) || '' },
         theme: { color: '#ff007a' },
-        method: { upi: true, card: false, netbanking: false, wallet: false, paylater: false, emi: false },
+        // v1.4.1: Drop the `method: { upi: true, card: false, ... }`
+        // restriction. In Razorpay test mode (especially on desktop, where
+        // UPI Intent doesn't apply directly), restricting to UPI-only can
+        // leave the sheet empty if the merchant account doesn't have all
+        // UPI flows enabled. Letting Razorpay show its default set (UPI +
+        // Card + Netbanking + Wallet) is bulletproof: mobile users still
+        // see UPI tiles prominently, desktop users get test-card / QR
+        // fallbacks. UPI auto-shows first when the device supports it.
         handler: async (resp) => {
           // Success path. Verify on server, get token.
           track('buy_rzp_success', { extra: { rzp_payment_id: resp.razorpay_payment_id } });
