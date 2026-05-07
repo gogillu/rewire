@@ -128,12 +128,20 @@ h1 {
 .qr {
   background: #fff;
   border-radius: 18px;
-  padding: 14px;
-  margin: 12px auto 18px;
-  max-width: 280px;
+  padding: 12px;
+  margin: 12px auto 12px;
+  width: 220px;
+  height: 220px;
+  display: flex; align-items: center; justify-content: center;
   text-align: center;
 }
-.qr img { display: block; margin: 0 auto; max-width: 100%; height: auto; border-radius: 8px; }
+.qr img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
 .upi-row {
   display: flex; align-items: center; gap: 10px;
   background: rgba(255,255,255,.06);
@@ -260,7 +268,7 @@ a { color: #ff8a00; }
 
       <p class="muted" style="text-align:center;margin-top:14px;font-size:12px">On a desktop? Open your UPI app, tap Scan, point at:</p>
       <div class="qr">
-        <img src="upi-qr.jpg" alt="UPI QR — 7000189190@airtel" style="max-width:160px;opacity:.85">
+        <img id="qrImg" src="" alt="UPI QR — ₹9 prefilled">
       </div>
       <p class="muted" style="font-size:11px;text-align:center;opacity:.6">
         ⚠ Saving this QR to gallery and re-scanning triggers the PhonePe ₹2,000 limit. Use the button above instead.
@@ -319,3 +327,4 @@ a { color: #ff8a00; }
 <script src="/buy/app.js"></script>
 </body>
 </html>
+

@@ -92,6 +92,7 @@
       $('#orderRef').textContent = order.order_id;
       $('#vpa').textContent = order.vpa;
       $('#upiBtn').href = order.deep_link;
+      $('#qrImg').src = '/api/buy/qr?order_id=' + encodeURIComponent(order.order_id);
       track('buy_order_created', { extra: { order_id: order.order_id } });
       show('pay');
     } catch (err) {
@@ -256,6 +257,7 @@
       $('#orderRef').textContent = o.order_id;
       $('#vpa').textContent = o.vpa;
       $('#upiBtn').href = o.deep_link;
+      $('#qrImg').src = '/api/buy/qr?order_id=' + encodeURIComponent(o.order_id);
       // Check status — if already approved, skip directly to done.
       fetch('/api/buy/status?order_id=' + encodeURIComponent(o.order_id))
         .then(r => r.ok ? r.json() : null)

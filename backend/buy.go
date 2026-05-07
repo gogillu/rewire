@@ -16,11 +16,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/mail"
 	"net/url"
@@ -29,12 +33,14 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"rsc.io/qr"
 )
 
 const (
 	premiumPriceINR    = 9
 	premiumPricePaise  = 900
-	upiVPA             = "7000189190@airtel"
+	upiVPA             = "8985248071@ybl"
 	upiPayeeName       = "Govind Choudhary"
 	premiumNote        = "Rewire Premium"
 	orderExpiryHours   = 24
@@ -1057,4 +1063,74 @@ func (s *Server) handleBuyFrontend() http.Handler {
 		defer f.Close()
 		http.ServeContent(w, r, info.Name(), info.ModTime(), f)
 	})
+}
+
+// handleBuyQR — v1.3.2 — generate a per-order UPI QR PNG that encodes the
+// EXACT same upi:// deep-link used by the "Pay ₹9 with UPI app" button.
+// This means scanning the QR also lands on the prefilled-amount intent
+// (no manual entry, no PhonePe gallery-QR ₹2,000 limit). Order ID is
+// optional — if absent, a generic VPA-only QR is rendered (less ideal,
+// since the amount won't be prefilled).
+func (s *Server) handleBuyQR(w http.ResponseWriter, r *http.Request) {
+	orderID := strings.TrimSpace(r.URL.Query().Get("order_id"))
+	var data string
+	if orderID == "" {
+		// fallback: VPA-only QR (no amount, no order)
+		v := url.Values{}
+		v.Set("pa", upiVPA)
+		v.Set("pn", upiPayeeName)
+		v.Set("cu", "INR")
+		data = "upi://pay?" + v.Encode()
+	} else {
+		// sanity-check: only base32 lowercase ids of bounded length allowed
+		if len(orderID) < 4 || len(orderID) > 32 {
+			http.Error(w, "bad order_id", http.StatusBadRequest)
+			return
+		}
+		for _, c := range orderID {
+			if !(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9') {
+				http.Error(w, "bad order_id", http.StatusBadRequest)
+				return
+			}
+		}
+		data = upiDeepLink(orderID, premiumPricePaise)
+	}
+
+	code, err := qr.Encode(data, qr.M)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// rsc.io/qr renders 1 module = 8 px by default. We render at 1 module
+	// = 12 px (~600 px QR) which is large enough to scan on a desktop
+	// screen but cheap to send.
+	const scale = 12
+	size := code.Size * scale
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	white := color.RGBA{255, 255, 255, 255}
+	black := color.RGBA{0, 0, 0, 255}
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			img.Set(x, y, white)
+		}
+	}
+	for y := 0; y < code.Size; y++ {
+		for x := 0; x < code.Size; x++ {
+			if code.Black(x, y) {
+				for dy := 0; dy < scale; dy++ {
+					for dx := 0; dx < scale; dx++ {
+						img.Set(x*scale+dx, y*scale+dy, black)
+					}
+				}
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = w.Write(buf.Bytes())
 }

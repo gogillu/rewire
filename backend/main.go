@@ -226,6 +226,7 @@ func main() {
 	mux.HandleFunc("POST /api/buy/complete", srv.handleBuyComplete)
 	mux.HandleFunc("POST /api/buy/recover", srv.handleBuyRecover)
 	mux.HandleFunc("POST /api/buy/claim", srv.handleBuyClaim) // v1.2: one-tap honor claim
+	mux.HandleFunc("GET /api/buy/qr", srv.handleBuyQR)        // v1.3.2: per-order UPI QR PNG
 	mux.Handle("GET /buy", srv.handleBuyFrontend())
 	mux.Handle("GET /buy/", srv.handleBuyFrontend())
 
@@ -296,7 +297,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // /api/version (JSON) and embedded in /api/movies app_version. We bump this
 // at every shipped release so users / debug tools can see what's actually
 // deployed (per rubber-duck #10).
-const appBuildVersion = "1.3.1"
+const appBuildVersion = "1.3.2"
 
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
