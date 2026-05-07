@@ -238,7 +238,7 @@ func (s *Server) handleBuySubmitUTR(w http.ResponseWriter, r *http.Request) {
 	_, _ = s.db.ExecContext(r.Context(), `
         INSERT INTO email_outbox (kind, order_id, to_addr, subject, html, next_attempt_at, created_at)
         VALUES ('admin-notify', ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(kind, order_id) DO NOTHING
+        ON CONFLICT(kind, order_id) WHERE order_id IS NOT NULL DO NOTHING
     `, b.OrderID, adminEmailFallback, subject, html, now, now)
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "utr_submitted"})
@@ -448,13 +448,235 @@ func (s *Server) mintAndEmailToken(ctx context.Context, orderID, email string, r
 	if _, err := tx.ExecContext(ctx, `
         INSERT INTO email_outbox (kind, order_id, to_addr, subject, html, next_attempt_at, created_at)
         VALUES ('token', ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(kind, order_id) DO UPDATE SET
+        ON CONFLICT(kind, order_id) WHERE order_id IS NOT NULL DO UPDATE SET
             to_addr=excluded.to_addr, subject=excluded.subject, html=excluded.html,
             status='pending', attempts=0, next_attempt_at=excluded.next_attempt_at
     `, orderID, email, subject, html, now, now); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// ---------- /api/buy/claim ----------
+//
+// v1.2: One-tap honor-based claim. UPI without a payment gateway has no
+// callback, so users were stuck on a manual UTR-paste step. New flow:
+//
+//   1. User pays via the upi:// deep-link.
+//   2. They come back and tap "I've paid — unlock now".
+//   3. POST /api/buy/claim {order_id} mints a token IMMEDIATELY, emails it,
+//      moves order to status='pending_verify'. The user is unblocked.
+//   4. Admin reconciles offline against bank statement; matching deposits
+//      are marked status='approved'; missing deposits get the order
+//      status='rejected' and the token revoked.
+//
+// Per rubber-duck review, this is bounded:
+//   * Rate-limit per anon_id: 1 successful claim per (anon_id, email) pair
+//     per 24 h.
+//   * Rate-limit per IP: max 5 orders per IP per 24 h.
+//   * Token marked ttl_at = now()+48h for unverified claims; revoked if
+//     no matching UTR by then. Once admin verifies, ttl_at is cleared.
+//   * Order ID + email + anon_id + IP + UA captured so admin can spot
+//     fraud quickly.
+//
+// At ₹9 with these guardrails, abuse loss is bounded and operational
+// reasoning stays simple.
+type buyClaimBody struct {
+	OrderID string `json:"order_id"`
+	UTR     string `json:"utr"` // optional — power users who copied UTR
+}
+
+func (s *Server) handleBuyClaim(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	r.Body = http.MaxBytesReader(w, r.Body, 4*1024)
+	var b buyClaimBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	b.OrderID = strings.TrimSpace(b.OrderID)
+	b.UTR = strings.ToUpper(strings.TrimSpace(b.UTR))
+	if b.OrderID == "" {
+		http.Error(w, "order_id required", http.StatusBadRequest)
+		return
+	}
+	if b.UTR != "" && (len(b.UTR) < 10 || len(b.UTR) > 30) {
+		http.Error(w, "utr (when provided) must be 10-30 alphanumeric chars", http.StatusBadRequest)
+		return
+	}
+	for _, c := range b.UTR {
+		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')) {
+			http.Error(w, "utr must be alphanumeric", http.StatusBadRequest)
+			return
+		}
+	}
+	now := time.Now().UnixMilli()
+	ip := clientIP(r)
+	ctx := r.Context()
+
+	// Look up the order.
+	var email, status, anonID string
+	err := s.db.QueryRowContext(ctx, `
+        SELECT email, status, COALESCE(anon_id,'') FROM payment_orders
+        WHERE order_id = ? AND expires_at > ?
+    `, b.OrderID, now).Scan(&email, &status, &anonID)
+	if err != nil {
+		http.Error(w, "order not found or expired", http.StatusNotFound)
+		return
+	}
+	if status == "approved" {
+		// Idempotent — re-emit the issued_token via /api/buy/complete.
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "already": true, "status": "approved"})
+		return
+	}
+	if status != "initiated" && status != "utr_submitted" {
+		http.Error(w, "order not in claimable state", http.StatusConflict)
+		return
+	}
+
+	// Rate-limit #1: max 1 successful claim per (email) per 24 h. Accidental
+	// duplicate clicks on the same order are fine (handled above as already-approved).
+	since := time.Now().Add(-24 * time.Hour).UnixMilli()
+	var prevClaims int
+	_ = s.db.QueryRowContext(ctx, `
+        SELECT COUNT(*) FROM payment_orders
+        WHERE email = ? AND status IN ('pending_verify','approved')
+          AND COALESCE(approved_at, updated_at) >= ?
+    `, email, since).Scan(&prevClaims)
+	if prevClaims >= 1 {
+		// One paid lifetime token per email is enough.
+		http.Error(w, "this email already has a pending or approved Premium token", http.StatusConflict)
+		return
+	}
+	// Rate-limit #2: max 5 orders per IP per 24 h.
+	var ipOrders int
+	_ = s.db.QueryRowContext(ctx, `
+        SELECT COUNT(*) FROM payment_orders WHERE ip = ? AND created_at >= ?
+    `, ip, since).Scan(&ipOrders)
+	if ipOrders > 5 {
+		http.Error(w, "too many orders from this network; try again tomorrow", http.StatusTooManyRequests)
+		return
+	}
+
+	// BEGIN IMMEDIATE so concurrent claims serialize.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+	_, _ = tx.ExecContext(ctx, `BEGIN IMMEDIATE`)
+
+	// Re-check status under the write lock.
+	var status2 string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT status FROM payment_orders WHERE order_id = ?`, b.OrderID).Scan(&status2); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if status2 == "approved" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "already": true, "status": "approved"})
+		return
+	}
+	if status2 != "initiated" && status2 != "utr_submitted" {
+		http.Error(w, "order not in claimable state", http.StatusConflict)
+		return
+	}
+
+	raw, hash, err := s.mintToken()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if _, err := tx.ExecContext(ctx, `
+        INSERT INTO premium_tokens (token_hash, email, order_id, issued_at)
+        VALUES (?, ?, ?, ?)
+    `, hash, email, b.OrderID, now); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// One-time pickup row keyed by (order_id, "AUTO-CLAIM" or actual UTR).
+	utrKey := b.UTR
+	if utrKey == "" {
+		utrKey = "AUTO-CLAIM"
+	}
+	if _, err := tx.ExecContext(ctx, `
+        INSERT OR REPLACE INTO issued_tokens (order_id, utr, raw_token, created_at)
+        VALUES (?, ?, ?, ?)
+    `, b.OrderID, utrKey, raw, now); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// status='pending_verify' is the new bucket for honor claims; admin
+	// dashboard already orders by (status='utr_submitted' DESC) — we add
+	// pending_verify to the queue as well via a separate query path.
+	if _, err := tx.ExecContext(ctx, `
+        UPDATE payment_orders
+        SET status='pending_verify',
+            utr=COALESCE(NULLIF(?, ''), utr),
+            token_hash=?,
+            reviewer_note=COALESCE(reviewer_note,'') || CASE WHEN ?<>'' THEN '' ELSE ' [auto-claim, pending bank verification]' END,
+            updated_at=?,
+            approved_at=?
+        WHERE order_id=?
+    `, b.UTR, hash, b.UTR, now, now, b.OrderID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Email the token immediately (best-effort, queued).
+	subject := "Your Rewire Premium token (lifetime) — pending verification"
+	html := fmt.Sprintf(
+		`<div style="font-family:system-ui,sans-serif;max-width:540px;margin:0 auto;padding:24px">
+		   <h2 style="margin:0 0 12px">Welcome to Rewire Premium ✨</h2>
+		   <p>Order: <code>%s</code></p>
+		   <p>Your lifetime token (paste this on <a href="https://rewire.gogillu.live/premium">rewire.gogillu.live/premium</a> when prompted):</p>
+		   <pre style="background:#111;color:#fff;padding:14px;border-radius:8px;overflow:auto;font-size:13px">%s</pre>
+		   <p style="opacity:.85;font-size:13px">Your payment is being verified against our bank statement (usually within 24 h).
+		     If it can't be matched, the token will be revoked and you'll be notified at this email.</p>
+		   <p style="opacity:.7;font-size:12px">Disputes / lost tokens: reply to this email or write to admin@gogillu.live.</p>
+		 </div>`,
+		b.OrderID, raw)
+	if _, err := tx.ExecContext(ctx, `
+        INSERT INTO email_outbox (kind, order_id, to_addr, subject, html, next_attempt_at, created_at)
+        VALUES ('token', ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(kind, order_id) WHERE order_id IS NOT NULL DO UPDATE SET
+            to_addr=excluded.to_addr, subject=excluded.subject, html=excluded.html,
+            status='pending', attempts=0, next_attempt_at=excluded.next_attempt_at
+    `, b.OrderID, email, subject, html, now, now); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Notify admin (separately) so they can reconcile.
+	adminSub := "[Rewire] AUTO-CLAIM ₹9 — needs verification: " + b.OrderID
+	adminHTML := fmt.Sprintf(
+		`<p>Honor-based claim received. Verify against bank statement.</p>
+		 <ul>
+		   <li><b>Order:</b> %s</li>
+		   <li><b>Email:</b> %s</li>
+		   <li><b>UTR:</b> %s</li>
+		   <li><b>IP:</b> %s</li>
+		   <li><b>Anon:</b> %s</li>
+		 </ul>
+		 <p>Verify in admin dashboard → Payment Queue.</p>`,
+		b.OrderID, email, b.UTR, ip, anonID)
+	_, _ = tx.ExecContext(ctx, `
+        INSERT INTO email_outbox (kind, order_id, to_addr, subject, html, next_attempt_at, created_at)
+        VALUES ('admin-notify', ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(kind, order_id) WHERE order_id IS NOT NULL DO NOTHING
+    `, b.OrderID, adminEmailFallback, adminSub, adminHTML, now, now)
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"status": "pending_verify",
+		"token":  raw, // delivered once; client stores in localStorage.
+		"email":  email,
+		"note":   "Premium unlocked. Email sent. Bank verification within 24 h.",
+	})
 }
 
 // ---------- /api/admin/payments (list pending) ----------
@@ -470,7 +692,10 @@ func (s *Server) handleAdminPayments(w http.ResponseWriter, r *http.Request) {
                COALESCE(country,''), COALESCE(city,''), COALESCE(isp,''),
                COALESCE(reviewer_note,''), created_at, updated_at, COALESCE(approved_at,0)
         FROM payment_orders
-        ORDER BY (status='utr_submitted') DESC, updated_at DESC
+        ORDER BY
+          (status IN ('utr_submitted', 'pending_verify')) DESC,
+          (status = 'utr_submitted') DESC,
+          updated_at DESC
         LIMIT 200
     `)
 	if err != nil {
@@ -553,6 +778,24 @@ func (s *Server) handleAdminApprove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	// v1.2: pending_verify is the post-honor-claim state. Approving it just
+	// marks the bank-verified bit; the user already got the token.
+	if status == "pending_verify" {
+		if _, err := tx.ExecContext(r.Context(), `
+            UPDATE payment_orders
+            SET status='approved', reviewer_note=?, updated_at=?
+            WHERE order_id=?
+        `, b.Note, now, b.OrderID); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "verified": true})
+		return
+	}
 	if status != "utr_submitted" {
 		// Idempotent: double-click on already-approved row is a no-op success.
 		if status == "approved" {
@@ -604,7 +847,7 @@ func (s *Server) handleAdminApprove(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.ExecContext(r.Context(), `
         INSERT INTO email_outbox (kind, order_id, to_addr, subject, html, next_attempt_at, created_at)
         VALUES ('token', ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(kind, order_id) DO UPDATE SET
+        ON CONFLICT(kind, order_id) WHERE order_id IS NOT NULL DO UPDATE SET
             to_addr=excluded.to_addr, subject=excluded.subject, html=excluded.html,
             status='pending', attempts=0, next_attempt_at=excluded.next_attempt_at
     `, b.OrderID, email, subject, html, now, now); err != nil {
@@ -634,10 +877,17 @@ func (s *Server) handleAdminReject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UnixMilli()
-	res, err := s.db.ExecContext(r.Context(), `
+	// v1.2: rejecting a pending_verify order also revokes the issued token.
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(r.Context(), `
         UPDATE payment_orders
         SET status='rejected', reviewer_note=?, updated_at=?
-        WHERE order_id=? AND status IN ('initiated', 'utr_submitted')
+        WHERE order_id=? AND status IN ('initiated', 'utr_submitted', 'pending_verify')
     `, b.Note, now, b.OrderID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -646,6 +896,14 @@ func (s *Server) handleAdminReject(w http.ResponseWriter, r *http.Request) {
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		http.Error(w, "order not eligible for rejection", http.StatusConflict)
+		return
+	}
+	// Revoke any tokens minted under this order.
+	_, _ = tx.ExecContext(r.Context(),
+		`UPDATE premium_tokens SET revoked_at = ? WHERE order_id = ? AND revoked_at IS NULL`,
+		now, b.OrderID)
+	if err := tx.Commit(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

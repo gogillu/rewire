@@ -1,12 +1,13 @@
 // Rewire service worker — cache-first for static + audio, network-first for API.
-const VERSION = 'rewire-v7';
+//
+// v9 (1.2.0): bumped to evict stale cached bundles from earlier v1.1 build.
+// Also we now ALWAYS network-first for HTML+JS so a missed bump doesn't pin
+// users to an old shell.
+const VERSION = 'rewire-v9';
 const STATIC_CACHE = `${VERSION}-static`;
 const AUDIO_CACHE = `${VERSION}-audio`;
 
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/app.js',
   '/manifest.webmanifest',
   '/icon.svg',
 ];
@@ -24,6 +25,13 @@ self.addEventListener('activate', (event) => {
     ).then(() => self.clients.claim())
   );
 });
+
+// HTML + app.js: always network-first so deploys are picked up on next reload.
+function isShell(url) {
+  return url.pathname === '/' ||
+    url.pathname === '/index.html' ||
+    url.pathname === '/app.js';
+}
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
@@ -43,6 +51,26 @@ self.addEventListener('fetch', (event) => {
         return resp;
       } catch {
         return new Response('', { status: 504 });
+      }
+    })());
+    return;
+  }
+
+  // Shell (HTML + app.js): network-first. We refuse to ever pin clients to
+  // a stale build again.
+  if (isShell(url)) {
+    event.respondWith((async () => {
+      try {
+        const resp = await fetch(req, { cache: 'no-store' });
+        if (resp.ok) {
+          const cache = await caches.open(STATIC_CACHE);
+          cache.put(req, resp.clone());
+        }
+        return resp;
+      } catch {
+        const cache = await caches.open(STATIC_CACHE);
+        return (await cache.match(req)) || (await cache.match('/index.html')) ||
+          new Response('offline', { status: 503 });
       }
     })());
     return;

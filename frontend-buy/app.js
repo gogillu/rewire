@@ -138,33 +138,49 @@
     } catch {}
   });
   $('#upiBtn').addEventListener('click', () => track('buy_upi_app_clicked'));
-  $('#paidBtn').addEventListener('click', () => { track('buy_paid_clicked'); show('utr'); });
 
-  // ---------- Step 3 — UTR ----------
-  $('#utrSubmit').addEventListener('click', async () => {
-    const utr = $('#utr').value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (utr.length < 10 || utr.length > 30) { alert('UTR must be 10–30 letters/digits.'); return; }
+  // v1.2: One-tap honor claim. Token is minted + emailed instantly; admin
+  // reconciles offline. Optional UTR (collapsed in <details>) helps verification.
+  $('#claimBtn').addEventListener('click', async () => {
     if (!order) { alert('Lost order context. Please refresh.'); return; }
-    $('#utrSubmit').disabled = true;
-    $('#utrSubmit').textContent = 'Submitting…';
+    let utr = ($('#utr')?.value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (utr && (utr.length < 10 || utr.length > 30)) {
+      alert('UTR must be 10–30 letters/digits, or leave it blank.');
+      return;
+    }
+    $('#claimBtn').disabled = true;
+    $('#claimBtn').textContent = 'Unlocking…';
+    track('buy_claim_clicked', { extra: { has_utr: utr ? 1 : 0 } });
     try {
-      const r = await fetch('/api/buy/submit-utr', {
+      const r = await fetch('/api/buy/claim', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ order_id: order.order_id, utr }),
       });
-      if (r.status === 409) { alert('That UTR is already on file. Please double-check.'); return; }
+      if (r.status === 409) {
+        const txt = await r.text();
+        alert(txt || 'Already claimed.');
+        return;
+      }
+      if (r.status === 429) {
+        alert('Too many claims from this network. Please wait or contact admin@gogillu.live.');
+        return;
+      }
       if (!r.ok) throw new Error(await r.text());
-      utrSubmitted = true;
-      localStorage.setItem('rw_buy_utr', utr);
-      track('buy_utr_submitted');
-      $('#pendingOrder').textContent = order.order_id;
-      show('pending');
-      startPolling();
+      const j = await r.json();
+      if (utr) localStorage.setItem('rw_buy_utr', utr);
+      if (j.token) {
+        localStorage.setItem('rw_premium_token', j.token);
+        $('#tokenBox').textContent = j.token;
+      } else {
+        $('#tokenBox').textContent = '(token already retrieved — check your email)';
+      }
+      track('buy_token_unlocked');
+      show('done');
     } catch (err) {
-      alert('Failed: ' + (err.message || err));
+      alert('Unlock failed: ' + (err.message || err) + '\n\nIf you paid, write to admin@gogillu.live with order ' + (order && order.order_id) + '.');
     } finally {
-      $('#utrSubmit').disabled = false;
-      $('#utrSubmit').textContent = 'Submit & wait for approval';
+      $('#claimBtn').disabled = false;
+      $('#claimBtn').textContent = '✨ I\u0027ve paid — unlock now';
     }
   });
 
@@ -222,6 +238,10 @@
   });
 
   // ---------- Resume on reload ----------
+  // v1.2: with the one-tap claim flow, resume just drops the user back on
+  // the pay screen (with the order context restored). If they already
+  // unlocked and have a token, /premium handles that and we don't need
+  // to do anything special here.
   (function resume() {
     const saved = localStorage.getItem('rw_buy_order');
     if (!saved) return;
@@ -236,10 +256,19 @@
       $('#orderRef').textContent = o.order_id;
       $('#vpa').textContent = o.vpa;
       $('#upiBtn').href = o.deep_link;
-      // Jump straight to status check.
-      $('#pendingOrder').textContent = o.order_id;
-      show('pending');
-      startPolling();
+      // Check status — if already approved, skip directly to done.
+      fetch('/api/buy/status?order_id=' + encodeURIComponent(o.order_id))
+        .then(r => r.ok ? r.json() : null)
+        .then(j => {
+          if (j && (j.status === 'approved' || j.status === 'pending_verify') &&
+              localStorage.getItem('rw_premium_token')) {
+            $('#tokenBox').textContent = localStorage.getItem('rw_premium_token');
+            show('done');
+            return;
+          }
+          show('pay');
+        })
+        .catch(() => show('pay'));
     } catch {}
   })();
 })();

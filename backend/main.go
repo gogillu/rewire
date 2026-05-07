@@ -27,19 +27,34 @@ import (
 )
 
 type Movie struct {
-	ID            string   `json:"id"`
-	Title         string   `json:"title"`
-	Year          int      `json:"year"`
-	IMDBRating    float64  `json:"imdb_rating"`
-	Genre         string   `json:"genre"`
-	Synopsis      string   `json:"synopsis"`
-	ActualEnding  string   `json:"actual_ending"`
-	PosterURL     string   `json:"poster_url"`
-	BackdropURL   string   `json:"backdrop_url,omitempty"`
-	YouTubeID     string   `json:"youtube_id,omitempty"`
-	HasAudio      bool     `json:"has_audio"`
-	AudioVersion  int64    `json:"audio_version,omitempty"`
-	Endings       []Ending `json:"endings"`
+	ID            string            `json:"id"`
+	Title         string            `json:"title"`
+	Year          int               `json:"year"`
+	IMDBRating    float64           `json:"imdb_rating"`
+	Genre         string            `json:"genre"`
+	Synopsis      string            `json:"synopsis"`
+	ActualEnding  string            `json:"actual_ending"`
+	PosterURL     string            `json:"poster_url"`
+	BackdropURL   string            `json:"backdrop_url,omitempty"`
+	YouTubeID     string            `json:"youtube_id,omitempty"`
+	HasAudio      bool              `json:"has_audio"`
+	AudioVersion  int64             `json:"audio_version,omitempty"`
+	Endings       []Ending          `json:"endings"`
+	// v1.2 additions: per-movie stats (Sagar feedback) + community endings (Abhinav feedback).
+	Views         int64             `json:"views"`
+	LikesTotal    int64             `json:"likes_total"`
+	ConversionPct float64           `json:"conversion_pct"`
+	Community     []CommunityEnding `json:"community,omitempty"`
+}
+
+type CommunityEnding struct {
+	ID         int64   `json:"id"`
+	Author     string  `json:"author"`
+	Text       string  `json:"text"`
+	Likes      int64   `json:"likes"`
+	AvgRating  float64 `json:"avg_rating"`
+	RatingN    int64   `json:"rating_n"`
+	CreatedAt  string  `json:"created_at,omitempty"`
 }
 
 type Ending struct {
@@ -160,6 +175,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", srv.handleHealth)
+	mux.HandleFunc("GET /api/version", srv.handleVersion)
 	mux.HandleFunc("GET /api/movies", srv.handleMovies)
 	mux.HandleFunc("POST /api/like", srv.handleLike)
 	mux.HandleFunc("POST /api/events", srv.handleEvents)
@@ -171,6 +187,11 @@ func main() {
 	mux.HandleFunc("POST /api/abhinav/like", srv.handleAbhinavLike)
 	mux.HandleFunc("POST /api/abhinav/submit-ending", srv.handleAbhinavSubmitEnding)
 	mux.HandleFunc("POST /api/abhinav/rate-ending", srv.handleAbhinavRateEnding)
+
+	// ---- v1.2: community endings on default `/` (Abhinav feature ported) ----
+	mux.HandleFunc("POST /api/community/submit-ending", srv.handleCommunitySubmitEnding)
+	mux.HandleFunc("POST /api/community/like-ending", srv.handleCommunityLikeEnding)
+	mux.HandleFunc("POST /api/community/rate-ending", srv.handleCommunityRateEnding)
 	mux.Handle("GET /abhinav", srv.handleAbhinavFrontend())
 	mux.Handle("GET /abhinav/", srv.handleAbhinavFrontend())
 	mux.HandleFunc("GET /api/sagar/movies", srv.handleSagarMovies)
@@ -204,6 +225,7 @@ func main() {
 	mux.HandleFunc("GET /api/buy/status", srv.handleBuyStatus)
 	mux.HandleFunc("POST /api/buy/complete", srv.handleBuyComplete)
 	mux.HandleFunc("POST /api/buy/recover", srv.handleBuyRecover)
+	mux.HandleFunc("POST /api/buy/claim", srv.handleBuyClaim) // v1.2: one-tap honor claim
 	mux.Handle("GET /buy", srv.handleBuyFrontend())
 	mux.Handle("GET /buy/", srv.handleBuyFrontend())
 
@@ -270,6 +292,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// appBuildVersion is the human-visible version string. Surfaced via
+// /api/version (JSON) and embedded in /api/movies app_version. We bump this
+// at every shipped release so users / debug tools can see what's actually
+// deployed (per rubber-duck #10).
+const appBuildVersion = "1.2.0"
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version": appBuildVersion,
+		"time":    time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
 // handleMovies returns the full movie payload. We cache the JSON for 5
 // seconds in-process — the frontend asks for the whole list once on load
 // and every "like" invalidates the cache so counts stay live without a
@@ -302,7 +338,7 @@ func (s *Server) handleMovies(w http.ResponseWriter, r *http.Request) {
 		"movies":      movies,
 		"generated":   time.Now().UTC().Format(time.RFC3339),
 		"count":       len(movies),
-		"app_version": "0.1.0",
+		"app_version": "1.2.0",
 	})
 	s.cacheMu.Lock()
 	s.cacheJSON = body
@@ -449,9 +485,73 @@ func (s *Server) loadMovies(ctx context.Context) ([]Movie, error) {
 		_ = slot
 		if i, ok := idx[movieID]; ok {
 			out[i].Endings = append(out[i].Endings, e)
+			out[i].LikesTotal += e.Likes
 		}
 	}
-	return out, erows.Err()
+	if err := erows.Err(); err != nil {
+		return nil, err
+	}
+
+	// v1.2: per-movie unique-viewer count from telemetry (Sagar feature).
+	// Best-effort; if telemetry table doesn't exist on a fresh DB we just skip.
+	if vrows, err := s.db.QueryContext(ctx, `
+        SELECT movie_id, COUNT(DISTINCT anon_id) AS views
+        FROM telemetry_events
+        WHERE event_type = 'card_enter' AND movie_id IS NOT NULL AND movie_id != ''
+        GROUP BY movie_id
+    `); err == nil {
+		for vrows.Next() {
+			var mid string
+			var v int64
+			if err := vrows.Scan(&mid, &v); err == nil {
+				if i, ok := idx[mid]; ok {
+					out[i].Views = v
+				}
+			}
+		}
+		vrows.Close()
+	}
+	// Conversion = likes / views, clamped to [0, 100].
+	for i := range out {
+		if out[i].Views > 0 {
+			pct := float64(out[i].LikesTotal) / float64(out[i].Views) * 100.0
+			if pct > 100.0 {
+				pct = 100.0
+			}
+			out[i].ConversionPct = float64(int(pct*10+0.5)) / 10.0
+		}
+	}
+
+	// v1.2: community endings (Abhinav feature) — community-submitted endings
+	// with their likes + avg rating. We piggy-back on abhinav_endings table
+	// (target='movie' is the existing convention) so /abhinav and / share data.
+	// Best-effort — table might be empty / not yet created on a fresh DB.
+	if crows, err := s.db.QueryContext(ctx, `
+        SELECT id, content_id, COALESCE(author, 'anonymous') AS author,
+               text, likes,
+               CASE WHEN rating_n > 0 THEN rating_sum / rating_n ELSE 0 END AS avg_rating,
+               rating_n,
+               COALESCE(created_at, '') AS created_at
+        FROM abhinav_endings
+        WHERE source = 'community'
+        ORDER BY likes DESC, id DESC
+    `); err == nil {
+		for crows.Next() {
+			var ce CommunityEnding
+			var movieID string
+			if err := crows.Scan(&ce.ID, &movieID, &ce.Author, &ce.Text,
+				&ce.Likes, &ce.AvgRating, &ce.RatingN, &ce.CreatedAt); err == nil {
+				if i, ok := idx[movieID]; ok {
+					if len(out[i].Community) < 25 { // cap per movie to keep payload small
+						out[i].Community = append(out[i].Community, ce)
+					}
+				}
+			}
+		}
+		crows.Close()
+	}
+
+	return out, nil
 }
 
 // seedMovies upserts every movie in the JSON file. Existing rows keep their

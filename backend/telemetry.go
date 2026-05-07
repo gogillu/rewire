@@ -43,6 +43,8 @@ CREATE INDEX IF NOT EXISTS idx_te_ts    ON telemetry_events(ts);
 CREATE INDEX IF NOT EXISTS idx_te_movie ON telemetry_events(movie_id);
 CREATE INDEX IF NOT EXISTS idx_te_anon  ON telemetry_events(anon_id);
 CREATE INDEX IF NOT EXISTS idx_te_type  ON telemetry_events(event_type);
+-- v1.2: composite for handleMovies' card_enter aggregation (Sagar feature on /).
+CREATE INDEX IF NOT EXISTS idx_te_views ON telemetry_events(event_type, movie_id, anon_id);
 
 CREATE TABLE IF NOT EXISTS feedbacks (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

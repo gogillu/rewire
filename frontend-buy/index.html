@@ -227,7 +227,7 @@ a { color: #ff8a00; }
 
   <!-- Step 2: UPI -->
   <section id="step-pay" class="step">
-    <div style="text-align:center;margin-bottom:8px"><span class="status-pill">Step 2 of 3 · Pay ₹9</span></div>
+    <div style="text-align:center;margin-bottom:8px"><span class="status-pill">Step 2 of 2 · Pay & unlock</span></div>
     <p style="font-size:14px;line-height:1.45;margin:8px 0">Pay <b>₹9</b> via any UPI app to:</p>
     <div class="upi-row">
       <code id="vpa">7000189190@airtel</code>
@@ -240,18 +240,17 @@ a { color: #ff8a00; }
     <div class="qr">
       <img src="upi-qr.jpg" alt="UPI QR — 7000189190@airtel">
     </div>
-    <button class="btn secondary" id="paidBtn">I've paid → enter UTR</button>
-  </section>
-
-  <!-- Step 3: UTR -->
-  <section id="step-utr" class="step">
-    <div style="text-align:center;margin-bottom:8px"><span class="status-pill">Step 3 of 3 · Confirm</span></div>
-    <div class="field">
-      <label for="utr">UTR / transaction reference</label>
-      <input id="utr" type="text" autocomplete="off" placeholder="e.g. 4321987654321" maxlength="30">
-      <div class="note">Your UPI app shows this number after payment. 10–30 letters/digits. We use it to verify your payment.</div>
-    </div>
-    <button class="btn" id="utrSubmit">Submit & wait for approval</button>
+    <button class="btn" id="claimBtn" style="margin-top:14px">✨ I've paid — unlock now</button>
+    <details id="utrToggle" style="margin-top:10px">
+      <summary class="muted" style="cursor:pointer;font-size:12.5px;text-align:center">Have a UTR? (optional — helps verify faster)</summary>
+      <div class="field" style="margin-top:10px">
+        <label for="utr" style="font-size:12px;opacity:.8">UTR / transaction reference</label>
+        <input id="utr" type="text" autocomplete="off" placeholder="e.g. 4321987654321" maxlength="30">
+      </div>
+    </details>
+    <p class="muted" style="margin-top:10px;font-size:12px;line-height:1.5">
+      Your token is unlocked instantly and emailed to you. We verify against our bank statement within 24h. If your payment can't be matched, the token is revoked and you're notified by email.
+    </p>
   </section>
 
   <!-- Step 4: Pending -->

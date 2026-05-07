@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#000000">
+<meta name="rewire-version" content="1.2.0">
 <title>Rewire — Alternate endings of Bollywood</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
@@ -82,6 +83,23 @@ html, body {
   text-transform: uppercase;
   text-shadow: 0 1px 8px rgba(0,0,0,.7);
 }
+/* v1.2: per-card stats badge — views · likes · conversion% */
+.top .stats {
+  margin-top: 4px;
+  font-size: 10.5px;
+  opacity: .8;
+  letter-spacing: .8px;
+  display: inline-flex; gap: 10px;
+  background: rgba(0,0,0,.32);
+  border: 1px solid rgba(255,255,255,.08);
+  padding: 3px 10px;
+  border-radius: 999px;
+  text-shadow: 0 1px 4px rgba(0,0,0,.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.top .stats span { white-space: nowrap; }
+.top .stats em { font-style: normal; opacity: .55; margin-right: 2px; }
 
 /* BOTTOM — three endings stacked just above brand */
 .endings {
@@ -185,6 +203,145 @@ html, body {
   margin-right: 6px;
   -webkit-text-fill-color: #ff007a;
   font-size: 10px;
+}
+
+/* v1.2: community endings — collapsed pill above the AI endings.
+   Tap to expand a sheet showing community submissions + 5-star rating. */
+.community-pill {
+  position: absolute;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 244px);
+  transform: translateX(-50%);
+  z-index: 4;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.36);
+  border: 1px solid rgba(255,255,255,.10);
+  color: rgba(255,255,255,.85);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .4px;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  text-shadow: 0 1px 4px rgba(0,0,0,.6);
+}
+.community-pill:active { transform: translateX(-50%) scale(.96); }
+.community-pill .dot { width: 5px; height: 5px; border-radius: 50%; background: #ff007a; }
+
+#communitySheet {
+  position: fixed; inset: 0;
+  z-index: 230;
+  display: none; align-items: flex-end; justify-content: center;
+  background: rgba(0,0,0,.7);
+  -webkit-backdrop-filter: blur(8px);
+          backdrop-filter: blur(8px);
+}
+#communitySheet.open { display: flex; }
+#communitySheet .sheet {
+  width: 100%;
+  max-width: 520px;
+  max-height: 80vh;
+  background: linear-gradient(180deg, #15151a, #0e0e12);
+  border-top-left-radius: 22px;
+  border-top-right-radius: 22px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-bottom: 0;
+  padding: 22px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -20px 60px rgba(0,0,0,.6);
+  animation: sheetIn .25s ease both;
+  overflow-y: auto;
+}
+#communitySheet h3 { margin: 0 0 4px; font-size: 17px; }
+#communitySheet .desc {
+  font-size: 12px; opacity: .55; margin-bottom: 14px; letter-spacing: .4px;
+}
+#communitySheet .ce-item {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  padding: 11px 12px;
+  margin-bottom: 8px;
+}
+#communitySheet .ce-text {
+  font-size: 14px; line-height: 1.36;
+  color: #fff; margin-bottom: 6px;
+}
+#communitySheet .ce-meta {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11px; opacity: .65;
+}
+#communitySheet .ce-meta .author { font-weight: 600; }
+#communitySheet .ce-meta .heart-mini {
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.08);
+}
+#communitySheet .ce-meta .heart-mini.liked { color: #ff5e9e; border-color: rgba(255,94,158,.4); }
+#communitySheet .stars {
+  display: inline-flex; gap: 2px; margin-left: auto;
+  font-size: 14px;
+}
+#communitySheet .stars span {
+  cursor: pointer; opacity: .35;
+  transition: opacity .15s, transform .15s;
+}
+#communitySheet .stars span.filled { opacity: 1; color: #ffd166; }
+#communitySheet .stars:hover span { opacity: .55; }
+#communitySheet .stars span:hover,
+#communitySheet .stars span:hover ~ span { opacity: .35; }
+#communitySheet .empty {
+  text-align: center; padding: 22px 8px;
+  font-size: 13px; opacity: .55;
+}
+#communitySheet .add-area {
+  margin-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.08);
+  padding-top: 12px;
+}
+#communitySheet .add-area .row {
+  display: flex; gap: 8px; align-items: center; margin-bottom: 8px;
+}
+#communitySheet .add-area input {
+  flex: 1;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px;
+  padding: 8px 10px; color: #fff;
+  font: inherit; font-size: 13px;
+  box-sizing: border-box;
+}
+#communitySheet .add-area textarea {
+  width: 100%; min-height: 56px; resize: vertical;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px;
+  padding: 9px 11px; color: #fff;
+  font: inherit; font-size: 13px;
+  box-sizing: border-box;
+}
+#communitySheet .add-area .send {
+  background: linear-gradient(90deg, #ff007a, #ff8a00);
+  color: #fff; border: 0;
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-weight: 700; font-size: 13px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+#communitySheet .add-area .send:disabled { opacity: .4; cursor: not-allowed; }
+#communitySheet .closer {
+  position: absolute; top: 10px; right: 10px;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
 }
 
 .audio-toggle {
@@ -523,6 +680,23 @@ html, body {
   </div>
 </div>
 
+<!-- Community endings sheet (v1.2) -->
+<div id="communitySheet" role="dialog" aria-modal="true" aria-label="Community endings">
+  <div class="sheet">
+    <button class="closer" id="communityClose" aria-label="Close">×</button>
+    <h3 id="communityTitle">Community endings</h3>
+    <div class="desc">Endings written by other users. Tap stars to rate, ❤ to like.</div>
+    <div id="communityList"></div>
+    <div class="add-area">
+      <div class="row">
+        <input id="communityAuthor" maxlength="32" placeholder="Your name (optional)">
+      </div>
+      <textarea id="communityText" maxlength="200" placeholder="Write your alternate ending in ≤ 200 chars…"></textarea>
+      <button class="send" id="communitySubmit">Post your ending</button>
+    </div>
+  </div>
+</div>
+
 <!-- Premium nudge banner -->
 <div id="premiumNudge">
   <div class="body">
@@ -533,10 +707,10 @@ html, body {
   <button class="x" id="premiumClose" aria-label="Close">×</button>
 </div>
 
-<script src="/app.js"></script>
+<script src="/app.js?v=1.2.0"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  navigator.serviceWorker.register('/sw.js?v=1.2.0').catch(()=>{});
 }
 </script>
 </body>

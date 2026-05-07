@@ -1,5 +1,10 @@
 // Rewire frontend — vanilla JS. Random shuffle on every page load,
 // local /audio/<id>.mp3 playback (loop), persistent like history.
+//
+// v1.2.0: per-card stats overlay (Sagar feature) + community endings
+// (Abhinav feature) + premium nudge + flag UX.
+window.REWIRE_VERSION = '1.2.0';
+console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
 (function () {
   'use strict';
 
@@ -72,6 +77,10 @@
     cardsViewed: 0,        // monotonic count, used to gate feedback widget
     pendingFlagMovie: null,
     nudgeDismissedAt: 0,
+    // v1.2 community
+    communityMovie: null,                  // currently-open movie in sheet
+    communityLikes: new Set(),             // ending_ids the user has liked
+    communityRatings: new Map(),           // ending_id -> 1..5
   };
 
   // ---------- Telemetry ----------
@@ -281,12 +290,21 @@
     vig.className = 'vignette';
     card.appendChild(vig);
 
-    // TOP — movie title + year + IMDb rating
+    // TOP — movie title + year + IMDb rating + v1.2 stats badge
     const top = document.createElement('div');
     top.className = 'top';
+    const views = m.views || 0;
+    const likesTotal = m.likes_total || 0;
+    const conv = m.conversion_pct || 0;
+    const showStats = views > 0 || likesTotal > 0;
     top.innerHTML = `
       <div class="title">${escapeHTML(m.title)}</div>
       <div class="sub">${m.year || ''} · ★ ${(m.imdb_rating || 0).toFixed(1)}</div>
+      ${showStats ? `<div class="stats">
+        <span><em>👁</em>${formatLikes(views)}</span>
+        <span><em>❤</em>${formatLikes(likesTotal)}</span>
+        ${conv > 0 ? `<span><em>⚡</em>${conv}%</span>` : ''}
+      </div>` : ''}
     `;
     card.appendChild(top);
 
@@ -336,6 +354,19 @@
       onFlagClick(m.id);
     });
     card.appendChild(flag);
+
+    // v1.2 community pill — collapsed entry point above the AI endings.
+    // Shown unconditionally so users can post even if the movie has 0
+    // community endings yet. Count text reflects the current list.
+    const ccount = (m.community && m.community.length) || 0;
+    const pill = document.createElement('button');
+    pill.className = 'community-pill';
+    pill.innerHTML = `<span class="dot"></span> 💬 ${ccount} community ending${ccount===1?'':'s'} · add yours`;
+    pill.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      openCommunitySheet(m);
+    });
+    card.appendChild(pill);
 
     return card;
   }
@@ -657,6 +688,163 @@
     });
   }
 
+  // ---------- Community endings ----------
+  // The /api/movies payload includes m.community: an array (cap 25) of
+  // {id, author, text, likes, avg_rating, rating_n}. We render in the
+  // sheet on demand; not inline by default to keep the scroll surface
+  // distraction-free (per rubber-duck #6 + #7).
+  function openCommunitySheet(m) {
+    state.communityMovie = m;
+    track('community_open', { movie_id: m.id });
+    const list = $('#communityList');
+    list.innerHTML = '';
+    const items = (m.community || []).slice().sort((a,b)=>(b.likes||0)-(a.likes||0) || (b.rating_n||0)-(a.rating_n||0));
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'No community endings yet — be the first ✨';
+      list.appendChild(empty);
+    } else {
+      for (const ce of items) list.appendChild(buildCommunityItem(ce));
+    }
+    $('#communityTitle').textContent = `Community endings — ${escapeHTML(m.title)}`;
+    $('#communityText').value = '';
+    $('#communityAuthor').value = localStorage.getItem('rw_handle') || '';
+    $('#communitySubmit').disabled = false;
+    $('#communitySheet').classList.add('open');
+  }
+  function closeCommunitySheet() {
+    $('#communitySheet').classList.remove('open');
+    state.communityMovie = null;
+  }
+  function buildCommunityItem(ce) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ce-item';
+    wrap.dataset.endingId = ce.id;
+    const myLiked = state.communityLikes.has(ce.id);
+    const myRating = state.communityRatings.get(ce.id) || 0;
+    const avg = ce.avg_rating || 0;
+    const stars = [1,2,3,4,5].map(n => {
+      const filled = (myRating ? n <= myRating : n <= Math.round(avg));
+      return `<span data-n="${n}" class="${filled ? 'filled' : ''}">★</span>`;
+    }).join('');
+    wrap.innerHTML = `
+      <div class="ce-text">${escapeHTML(ce.text)}</div>
+      <div class="ce-meta">
+        <span class="author">@${escapeHTML(ce.author || 'anonymous')}</span>
+        <span class="heart-mini ${myLiked ? 'liked' : ''}" data-act="like">❤ ${formatLikes(ce.likes || 0)}</span>
+        <span class="rate-info">${ce.rating_n ? `${avg.toFixed(1)}★ · ${ce.rating_n}` : 'rate'}</span>
+        <span class="stars" data-act="rate">${stars}</span>
+      </div>
+    `;
+    wrap.querySelector('[data-act="like"]').addEventListener('click', () => communityLike(ce, wrap));
+    wrap.querySelectorAll('.stars span').forEach(s => {
+      s.addEventListener('click', () => communityRate(ce, Number(s.dataset.n), wrap));
+    });
+    return wrap;
+  }
+  async function communityLike(ce, wrap) {
+    const wasLiked = state.communityLikes.has(ce.id);
+    const delta = wasLiked ? -1 : +1;
+    if (wasLiked) state.communityLikes.delete(ce.id);
+    else state.communityLikes.add(ce.id);
+    persistCommunityLikes();
+    ce.likes = Math.max(0, (ce.likes || 0) + delta);
+    const btn = wrap.querySelector('[data-act="like"]');
+    btn.classList.toggle('liked', !wasLiked);
+    btn.innerHTML = `❤ ${formatLikes(ce.likes)}`;
+    track('community_like', { movie_id: state.communityMovie?.id, extra: { ending_id: ce.id, delta } });
+    try {
+      await fetch('/api/community/like-ending', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ending_id: ce.id, delta }),
+      });
+    } catch {}
+  }
+  async function communityRate(ce, rating, wrap) {
+    state.communityRatings.set(ce.id, rating);
+    persistCommunityRatings();
+    wrap.querySelectorAll('.stars span').forEach(s => {
+      s.classList.toggle('filled', Number(s.dataset.n) <= rating);
+    });
+    track('community_rate', { movie_id: state.communityMovie?.id, extra: { ending_id: ce.id, rating } });
+    try {
+      const r = await fetch('/api/community/rate-ending', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ending_id: ce.id, rating, anon_id: ANON_ID }),
+      });
+      if (r.ok) {
+        const j = await r.json();
+        ce.avg_rating = j.avg_rating; ce.rating_n = j.rating_n;
+        const info = wrap.querySelector('.rate-info');
+        if (info) info.textContent = j.rating_n ? `${(j.avg_rating||0).toFixed(1)}★ · ${j.rating_n}` : 'rate';
+      }
+    } catch {}
+  }
+  async function communitySubmit() {
+    const m = state.communityMovie;
+    if (!m) return;
+    const text = $('#communityText').value.trim();
+    const author = $('#communityAuthor').value.trim();
+    if (text.length < 4) { showToast('Need at least 4 characters'); return; }
+    $('#communitySubmit').disabled = true;
+    if (author) localStorage.setItem('rw_handle', author);
+    track('community_submit', { movie_id: m.id, extra: { len: text.length } });
+    try {
+      const r = await fetch('/api/community/submit-ending', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content_id: m.id, text, author, anon_id: ANON_ID }),
+      });
+      if (!r.ok) {
+        const t = await r.text();
+        showToast(t || 'Could not post — try again');
+        $('#communitySubmit').disabled = false;
+        return;
+      }
+      const j = await r.json();
+      // Optimistically prepend and re-render.
+      m.community = m.community || [];
+      m.community.unshift({
+        id: j.ending_id, author: j.author, text: j.text,
+        likes: 0, avg_rating: 0, rating_n: 0,
+      });
+      // Re-render the list area inside the open sheet.
+      openCommunitySheet(m);
+      // Update the pill count on the card.
+      $$(`.card[data-movie="${cssEscape(m.id)}"] .community-pill`).forEach(p => {
+        const c = m.community.length;
+        p.innerHTML = `<span class="dot"></span> 💬 ${c} community ending${c===1?'':'s'} · add yours`;
+      });
+      showToast('Posted ✨');
+    } catch (e) {
+      showToast('Network error');
+      $('#communitySubmit').disabled = false;
+    }
+  }
+  function setupCommunity() {
+    $('#communityClose').addEventListener('click', closeCommunitySheet);
+    $('#communitySheet').addEventListener('click', (e) => {
+      if (e.target.id === 'communitySheet') closeCommunitySheet();
+    });
+    $('#communitySubmit').addEventListener('click', communitySubmit);
+    // Hydrate community-likes / ratings from localStorage.
+    try {
+      const ls = JSON.parse(localStorage.getItem('rw_clikes') || '[]');
+      ls.forEach(id => state.communityLikes.add(id));
+    } catch {}
+    try {
+      const lr = JSON.parse(localStorage.getItem('rw_crates') || '{}');
+      Object.entries(lr).forEach(([k,v]) => state.communityRatings.set(Number(k), Number(v)));
+    } catch {}
+  }
+  function persistCommunityLikes() {
+    localStorage.setItem('rw_clikes', JSON.stringify(Array.from(state.communityLikes)));
+  }
+  function persistCommunityRatings() {
+    const o = {}; state.communityRatings.forEach((v,k) => { o[k] = v; });
+    localStorage.setItem('rw_crates', JSON.stringify(o));
+  }
+
   // ---------- Premium nudge ----------
   // Free users get a banner inviting them to /buy after they've enjoyed
   // the app for a while. Dismissible; re-shows after 30 more cards.
@@ -706,6 +894,7 @@
   setupFeedback();
   setupFlag();
   setupPremiumNudge();
+  setupCommunity();
   loadFlags();
 
   (async function boot() {
@@ -735,6 +924,10 @@
         m.has_audio = fresh.has_audio;
         m.audio_version = fresh.audio_version;
         m.poster_url = m.poster_url || fresh.poster_url;
+        m.views = fresh.views;
+        m.likes_total = fresh.likes_total;
+        m.conversion_pct = fresh.conversion_pct;
+        m.community = fresh.community || [];
       });
       state.cardEls.forEach(card => {
         const m = state.movies[Number(card.dataset.idx)];
@@ -748,6 +941,22 @@
           el.dataset.endingId = e.id;
           el.classList.toggle('liked', liked === e.id);
         });
+        // Update stats badge
+        const stats = $('.top .stats', card);
+        if (stats) {
+          const conv = m.conversion_pct || 0;
+          stats.innerHTML = `
+            <span><em>👁</em>${formatLikes(m.views||0)}</span>
+            <span><em>❤</em>${formatLikes(m.likes_total||0)}</span>
+            ${conv > 0 ? `<span><em>⚡</em>${conv}%</span>` : ''}
+          `;
+        }
+        // Update community pill count
+        const pill = $('.community-pill', card);
+        if (pill) {
+          const c = (m.community || []).length;
+          pill.innerHTML = `<span class="dot"></span> 💬 ${c} community ending${c===1?'':'s'} · add yours`;
+        }
       });
     } catch {}
   }, 60_000);
