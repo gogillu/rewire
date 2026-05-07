@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#000">
 <title>Rewire Premium · Intense Mode</title>
+<link rel="stylesheet" href="/premium/rewire-intro.css?v=1.5.0">
 <style>
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
@@ -49,11 +50,34 @@ html, body {
   pointer-events: none;
 }
 .top .title {
-  font-size: clamp(22px, 6vw, 30px); font-weight: 800;
+  font-size: clamp(20px, 5.4vw, 28px); font-weight: 800;
   text-shadow: 0 2px 14px rgba(0,0,0,.8);
-  max-width: 92vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 90vw;
+  line-height: 1.18;
+  word-break: break-word;
 }
 .top .sub { font-size: 11px; opacity: .7; letter-spacing: 1.6px; text-transform: uppercase; }
+
+/* v1.5 — Insta-style stats chip on each card (parity with /direct) */
+.top .stats {
+  margin-top: 8px;
+  font-size: 13px;
+  opacity: .96;
+  letter-spacing: .3px;
+  display: inline-flex; gap: 14px;
+  background: rgba(0,0,0,.42);
+  border: 1px solid rgba(255,255,255,.13);
+  padding: 6px 14px;
+  border-radius: 999px;
+  text-shadow: 0 1px 6px rgba(0,0,0,.7);
+  -webkit-backdrop-filter: blur(12px);
+          backdrop-filter: blur(12px);
+  font-weight: 500;
+}
+.top .stats span { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.top .stats em { font-style: normal; opacity: .65; font-size: 13px; }
+.top .stats b { font-weight: 700; }
+
 .endings {
   position: absolute; left: 0; right: 0;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 54px);
@@ -77,26 +101,143 @@ html, body {
 .ending.liked {
   background: linear-gradient(135deg, rgba(255, 64, 129, .42), rgba(120, 40, 200, .30));
   border-color: rgba(255, 64, 129, .55);
+  box-shadow: 0 6px 32px rgba(255, 64, 129, .25);
 }
 .ending .text { flex: 1; font-size: clamp(17px, 4.5vw, 22px); font-weight: 700; line-height: 1.22; text-shadow: 0 2px 14px rgba(0,0,0,.6); }
 .ending .row { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; pointer-events: none; }
-.ending .vibe-chip {
-  display: inline-block;
-  font-size: 9px;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-  background: rgba(255,138,0,.25);
-  color: #ffb74d;
-  border: 1px solid rgba(255,138,0,.4);
-  padding: 2px 7px;
-  border-radius: 999px;
-  margin-bottom: 4px;
-  font-weight: 800;
-}
-.ending .heart { width: 20px; height: 20px; display: inline-block; background: currentColor; -webkit-mask: var(--heart) center/contain no-repeat; mask: var(--heart) center/contain no-repeat; opacity: .85; }
+.ending .heart { width: 22px; height: 22px; display: inline-block; background: currentColor; -webkit-mask: var(--heart) center/contain no-repeat; mask: var(--heart) center/contain no-repeat; opacity: .85; }
 .ending.liked .heart { color: #ff4081; opacity: 1; }
 :root { --heart: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 21s-7.5-4.7-9.6-9.4C1 7.7 4 4 7.5 4c2 0 3.7 1 4.5 2.6C12.8 5 14.5 4 16.5 4 20 4 23 7.7 21.6 11.6 19.5 16.3 12 21 12 21z'/></svg>"); }
 .ending .likes { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 13px; }
+.ending.placeholder {
+  background: rgba(20,20,20,.30);
+  cursor: default;
+  pointer-events: none;
+}
+.ending.placeholder .text { opacity: .55; font-style: italic; font-weight: 500; }
+
+/* v1.5 — community pill (port from /direct) */
+.community-pill {
+  margin: 8px 0 4px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px dashed rgba(255,255,255,.22);
+  background: rgba(0,0,0,.32);
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  color: rgba(255,255,255,.92);
+  font-size: 13px; font-weight: 600;
+  letter-spacing: .2px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, transform .12s;
+  user-select: none;
+}
+.community-pill:active { transform: scale(.985); }
+.community-pill:hover { background: rgba(0,0,0,.45); border-color: rgba(255,255,255,.32); }
+.community-pill .plus { font-size: 16px; font-weight: 300; opacity: .8; }
+.community-pill .pill-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  font-size: 11px; font-weight: 800;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff007a, #ff8a00);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(255,0,122,.35);
+}
+
+#communitySheet {
+  position: fixed; inset: 0;
+  z-index: 230;
+  display: none; align-items: flex-end; justify-content: center;
+  background: rgba(0,0,0,.7);
+  -webkit-backdrop-filter: blur(8px);
+          backdrop-filter: blur(8px);
+}
+#communitySheet.open { display: flex; }
+#communitySheet .sheet {
+  width: 100%; max-width: 520px; max-height: 80vh;
+  background: linear-gradient(180deg, #15151a, #0e0e12);
+  border-top-left-radius: 22px; border-top-right-radius: 22px;
+  border: 1px solid rgba(255,255,255,.08); border-bottom: 0;
+  padding: 22px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -20px 60px rgba(0,0,0,.6);
+  animation: sheetIn .25s ease both;
+  overflow-y: auto;
+  position: relative;
+}
+@keyframes sheetIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
+#communitySheet h3 {
+  margin: 0 0 10px;
+  font-size: 14px; font-weight: 600; letter-spacing: .3px; opacity: .7;
+}
+#communitySheet .ce-item {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  padding: 11px 12px;
+  margin-bottom: 8px;
+}
+#communitySheet .ce-text { font-size: 14px; line-height: 1.36; color: #fff; margin-bottom: 6px; }
+#communitySheet .ce-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; opacity: .65; }
+#communitySheet .ce-meta .author { font-weight: 600; }
+#communitySheet .ce-meta .heart-mini {
+  cursor: pointer; padding: 3px 7px; border-radius: 999px;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08);
+}
+#communitySheet .ce-meta .heart-mini.liked { color: #ff5e9e; border-color: rgba(255,94,158,.4); }
+#communitySheet .stars { display: inline-flex; gap: 2px; margin-left: auto; font-size: 14px; }
+#communitySheet .stars span { cursor: pointer; opacity: .35; transition: opacity .15s, transform .15s; }
+#communitySheet .stars span.filled { opacity: 1; color: #ffd166; }
+#communitySheet .add-area { margin-top: 14px; }
+#communitySheet .add-area textarea {
+  width: 100%; min-height: 110px; resize: none;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 14px;
+  padding: 14px 14px;
+  color: #fff; font: inherit; font-size: 15px; line-height: 1.4;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+}
+#communitySheet .add-area textarea:focus { outline: 0; border-color: rgba(255,138,0,.45); background: rgba(255,255,255,.07); }
+#communitySheet .add-area .row { display: flex; gap: 10px; align-items: center; margin: 0; }
+#communitySheet .add-area input {
+  flex: 1;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 999px;
+  padding: 11px 16px; color: #fff;
+  font: inherit; font-size: 13px;
+  box-sizing: border-box;
+}
+#communitySheet .add-area input:focus { outline: 0; border-color: rgba(255,255,255,.18); background: rgba(255,255,255,.06); }
+#communitySheet .add-area .send {
+  flex: 0 0 auto;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ff007a, #ff8a00);
+  color: #fff; border: 0;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  margin: 0; padding: 0;
+  box-shadow: 0 4px 14px rgba(255,0,122,.35);
+  transition: transform .12s ease, box-shadow .15s ease;
+}
+#communitySheet .add-area .send:active { transform: scale(.92); }
+#communitySheet .add-area .send:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
+#communitySheet .add-area .send svg { width: 18px; height: 18px; fill: currentColor; }
+#communitySheet .closer {
+  position: absolute; top: 10px; right: 10px;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
 
 .brand {
   position: absolute; left: 0; right: 0;
@@ -116,8 +257,11 @@ html, body {
   -webkit-text-fill-color: transparent;
 }
 
-.top-right-btns { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 14px); right: 14px; display: flex; gap: 8px; z-index: 11; }
-.top-left-btns { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 14px); left: 14px; display: flex; gap: 8px; z-index: 11; }
+/* v1.5 — moved icon clusters out of the title's way: all premium controls
+   now live in two bottom corners, above the brand. Title up top is
+   unobstructed. */
+.bot-left-btns  { position: fixed; left: 14px;  bottom: calc(env(safe-area-inset-bottom, 0px) + 38px); display: flex; gap: 8px; z-index: 11; }
+.bot-right-btns { position: fixed; right: 14px; bottom: calc(env(safe-area-inset-bottom, 0px) + 38px); display: flex; gap: 8px; z-index: 11; }
 .icon-btn {
   width: 36px; height: 36px; border-radius: 50%;
   background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.1);
@@ -145,6 +289,7 @@ html, body {
   position: relative;
 }
 .panel h3 { margin: 0 0 6px; font-size: 18px; }
+.panel h4 { margin: 22px 0 10px; font-size: 13px; letter-spacing: 1.2px; text-transform: uppercase; opacity: .55; font-weight: 700; }
 .panel .desc { font-size: 12px; opacity: .55; margin-bottom: 16px; }
 .panel .close-x { position: absolute; top: 12px; right: 14px; width: 30px; height: 30px; background: transparent; border: 0; color: rgba(255,255,255,.6); font-size: 18px; cursor: pointer; }
 .vibe-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -162,6 +307,15 @@ html, body {
   background: linear-gradient(135deg, rgba(255,138,0,.4), rgba(255,0,122,.4));
   border-color: rgba(255,138,0,.7);
 }
+.vibe-pill.soon { opacity: .55; position: relative; }
+.vibe-pill.soon::after {
+  content: "SOON";
+  position: absolute; top: 4px; right: 6px;
+  font-size: 8px; letter-spacing: 1px;
+  background: rgba(255,255,255,.1); color: rgba(255,255,255,.5);
+  padding: 1px 5px; border-radius: 999px;
+  font-weight: 700;
+}
 .btn {
   width: 100%; margin-top: 14px;
   background: linear-gradient(90deg, #ff007a, #ff8a00);
@@ -177,7 +331,6 @@ html, body {
 .lb-row .info { flex: 1; min-width: 0; }
 .lb-row .info .t { font-weight: 700; font-size: 14px; }
 .lb-row .info .e { font-size: 12px; opacity: .7; line-height: 1.4; margin-top: 2px; }
-.lb-row .info .v { display: inline-block; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; background: rgba(255,138,0,.25); color: #ffb74d; padding: 1px 6px; border-radius: 999px; margin-right: 4px; font-weight: 800; }
 .lb-row .likes { font-weight: 800; font-size: 14px; opacity: .8; }
 #tokenGate .panel input {
   width: 100%; background: rgba(255,255,255,.05);
@@ -193,15 +346,16 @@ html, body {
 </head>
 <body>
 
-<div class="top-left-btns">
-  <button class="icon-btn" id="vibeBtn" aria-label="Vibes" title="Intense Mode vibes">
+<!-- v1.5: bottom corners (was top corners — was clipping the title) -->
+<div class="bot-left-btns">
+  <button class="icon-btn" id="vibeBtn" aria-label="Vibes &amp; Categories" title="Intense Mode + categories">
     <svg viewBox="0 0 24 24"><path d="M12 2C8 6 6 9 6 13c0 3.3 2.7 6 6 6s6-2.7 6-6c0-4-2-7-6-11z"/></svg>
   </button>
   <button class="icon-btn" id="lbBtn" aria-label="Leaderboard" title="Leaderboard">
     <svg viewBox="0 0 24 24"><path d="M7 18h2v-7H7v7zm4 0h2V6h-2v12zm4 0h2v-4h-2v4zM3 21h18v2H3v-2z"/></svg>
   </button>
 </div>
-<div class="top-right-btns">
+<div class="bot-right-btns">
   <button class="icon-btn audio-toggle" id="audioBtn" aria-label="Toggle sound">
     <svg viewBox="0 0 24 24" id="audioIcon"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
   </button>
@@ -210,12 +364,12 @@ html, body {
 <div id="deck"></div>
 <div id="empty"><p>Loading premium endings…</p></div>
 
-<!-- Vibe picker -->
+<!-- Vibe + categories picker -->
 <div id="vibePanel">
   <div class="panel">
     <button class="close-x" data-close="vibe">×</button>
     <h3>Intense Mode</h3>
-    <div class="desc">Pick the vibes you want to see. Tap to toggle. Empty = surprise me with humour.</div>
+    <div class="desc">Pick the vibes you want. Tap to toggle. Empty = surprise me.</div>
     <div class="vibe-grid">
       <button class="vibe-pill" data-vibe="humour">😂 Humour</button>
       <button class="vibe-pill" data-vibe="emotional">🥹 Emotional</button>
@@ -223,6 +377,14 @@ html, body {
       <button class="vibe-pill" data-vibe="sad">😢 Sad</button>
       <button class="vibe-pill" data-vibe="happy">🥳 Happy</button>
       <button class="vibe-pill" data-vibe="impossible">🛸 Impossible</button>
+    </div>
+    <h4>Catalog</h4>
+    <div class="desc" style="margin-top:-6px;margin-bottom:12px">Mix Bollywood, Hollywood &amp; TV. Empty = Bollywood only.</div>
+    <div class="vibe-grid">
+      <button class="vibe-pill" data-cat="bollywood">🇮🇳 Bollywood</button>
+      <button class="vibe-pill" data-cat="hollywood">🌐 Hollywood</button>
+      <button class="vibe-pill" data-cat="tv-in">📺 TV (Indian)</button>
+      <button class="vibe-pill" data-cat="tv-foreign">📺 TV (Foreign)</button>
     </div>
     <button class="btn" id="vibeSave">Save</button>
   </div>
@@ -235,6 +397,24 @@ html, body {
     <h3>Top alternate endings</h3>
     <div class="desc">Most-loved endings across all movies + vibes.</div>
     <div id="lbRows">Loading…</div>
+  </div>
+</div>
+
+<!-- Community endings sheet -->
+<div id="communitySheet" role="dialog" aria-modal="true" aria-label="Community endings">
+  <div class="sheet">
+    <button class="closer" id="communityClose" aria-label="Close">×</button>
+    <h3 id="communityTitle">Community endings</h3>
+    <div id="communityList"></div>
+    <div class="add-area">
+      <textarea id="communityText" maxlength="200" placeholder="Write your alternate ending…"></textarea>
+      <div class="row">
+        <input id="communityAuthor" maxlength="32" placeholder="Your name (optional)">
+        <button class="send" id="communitySubmit" aria-label="Post ending">
+          <svg viewBox="0 0 24 24"><path d="M2.5 11.6 21.4 3.1c.6-.3 1.2.3.9.9l-8.5 18.9c-.3.6-1.2.6-1.4 0L9.6 14.4 2.5 12.9c-.6-.1-.6-1 0-1.3z"/></svg>
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -251,6 +431,7 @@ html, body {
   </div>
 </div>
 
-<script src="/premium/app.js"></script>
+<script src="/premium/rewire-intro.js?v=1.5.0"></script>
+<script src="/premium/app.js?v=1.5.0"></script>
 </body>
 </html>

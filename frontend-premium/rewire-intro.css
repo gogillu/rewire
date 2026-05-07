@@ -1,0 +1,149 @@
+/* Rewire intro animation — v1.5.0
+ *
+ * Shows once per browser session (sessionStorage flag). A dark fullscreen
+ * overlay with:
+ *   1. A faint brain SVG silhouette appears.
+ *   2. Eight neural lines stream in from offscreen, projecting toward
+ *      the brain. They cross-pulse as they "rewire" the synapses.
+ *   3. The brain morphs into the REWIRE wordmark with a neon gradient.
+ *   4. Overlay fades out at ~2.4s, revealing the feed.
+ *
+ * Tap-to-skip. Honors prefers-reduced-motion (skips immediately).
+ *
+ * Usage: include rewire-intro.css + rewire-intro.js, then call
+ *   RewireIntro.show()  // returns a Promise that resolves when intro is done
+ */
+
+#rewireIntro {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+  opacity: 1;
+  transition: opacity .35s ease;
+}
+#rewireIntro.fading { opacity: 0; pointer-events: none; }
+#rewireIntro.hidden { display: none; }
+
+#rewireIntro .stage {
+  position: relative;
+  width: min(78vw, 420px);
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#rewireIntro svg.brain {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 24px rgba(255, 0, 122, .35));
+  opacity: 0;
+  animation: rwiBrainIn 1.4s ease-out forwards;
+}
+#rewireIntro svg.brain .outline {
+  fill: none;
+  stroke: rgba(255, 255, 255, .85);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1400;
+  stroke-dashoffset: 1400;
+  animation: rwiBrainDraw 1.6s ease-out .12s forwards;
+}
+#rewireIntro svg.brain .synapse {
+  fill: rgba(255, 255, 255, .92);
+  opacity: 0;
+}
+#rewireIntro svg.brain .synapse.s1 { animation: rwiSpark 1.6s ease-out .9s forwards; }
+#rewireIntro svg.brain .synapse.s2 { animation: rwiSpark 1.6s ease-out 1.05s forwards; }
+#rewireIntro svg.brain .synapse.s3 { animation: rwiSpark 1.6s ease-out 1.18s forwards; }
+#rewireIntro svg.brain .synapse.s4 { animation: rwiSpark 1.6s ease-out 1.32s forwards; }
+#rewireIntro svg.brain .synapse.s5 { animation: rwiSpark 1.6s ease-out 1.46s forwards; }
+
+/* The "neural lines" projecting in from the periphery. SVG paths animated
+   via dashoffset, then a glow pulse. We have 8 of them at fixed angles. */
+#rewireIntro svg.lines {
+  position: absolute;
+  inset: -12%;
+  width: 124%;
+  height: 124%;
+  pointer-events: none;
+}
+#rewireIntro svg.lines line {
+  stroke: rgba(255, 0, 122, .9);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-dasharray: 220;
+  stroke-dashoffset: 220;
+  filter: drop-shadow(0 0 6px rgba(255, 0, 122, .6));
+  opacity: 0;
+}
+#rewireIntro svg.lines line.l1 { stroke: #ff007a;  animation: rwiLine 1.0s cubic-bezier(.2,.8,.2,1) .5s forwards; }
+#rewireIntro svg.lines line.l2 { stroke: #ff8a00;  animation: rwiLine 1.0s cubic-bezier(.2,.8,.2,1) .58s forwards; }
+#rewireIntro svg.lines line.l3 { stroke: #4a00e0;  animation: rwiLine 1.0s cubic-bezier(.2,.8,.2,1) .66s forwards; }
+#rewireIntro svg.lines line.l4 { stroke: #00d9ff;  animation: rwiLine 1.0s cubic-bezier(.2,.8,.2,1) .74s forwards; }
+#rewireIntro svg.lines line.l5 { stroke: #8e2de2;  animation: rwiLine 1.0s cubic-bezier(.2,.8,.2,1) .82s forwards; }
+#rewireIntro svg.lines line.l6 { stroke: #ff007a;  animation: rwiLine 1.0s cubic-bezier(.2,.8,.2,1) .9s forwards;  }
+#rewireIntro svg.lines line.l7 { stroke: #ff8a00;  animation: rwiLine 1.0s cubic-bezier(.2,.8,.2,1) .98s forwards; }
+#rewireIntro svg.lines line.l8 { stroke: #00d9ff;  animation: rwiLine 1.0s cubic-bezier(.2,.8,.2,1) 1.06s forwards; }
+
+#rewireIntro .wordmark {
+  position: absolute;
+  inset: auto 0 -52px 0;
+  text-align: center;
+  font-size: clamp(26px, 7vw, 38px);
+  font-weight: 900;
+  letter-spacing: .42em;
+  text-transform: uppercase;
+  background-image: linear-gradient(90deg, #ff8a00, #ff007a 35%, #8e2de2 70%, #4a00e0);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  opacity: 0;
+  transform: translateY(8px);
+  animation: rwiWordIn .7s cubic-bezier(.2,.9,.2,1) 1.45s forwards;
+}
+#rewireIntro .tagline {
+  position: absolute;
+  bottom: -90px;
+  left: 0; right: 0;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: .25em;
+  color: rgba(255, 255, 255, .55);
+  text-transform: uppercase;
+  opacity: 0;
+  animation: rwiTagIn .55s ease-out 1.7s forwards;
+}
+#rewireIntro .skip-hint {
+  position: absolute;
+  top: max(env(safe-area-inset-top, 0px), 14px);
+  right: 14px;
+  font-size: 11px;
+  letter-spacing: .15em;
+  color: rgba(255, 255, 255, .35);
+  text-transform: uppercase;
+  opacity: 0;
+  animation: rwiTagIn .4s ease-out 1.0s forwards;
+}
+
+@keyframes rwiBrainIn   { to { opacity: 1; } }
+@keyframes rwiBrainDraw { to { stroke-dashoffset: 0; } }
+@keyframes rwiSpark     { 0% { opacity: 0; transform: scale(.6); transform-origin: center; }
+                          40% { opacity: 1; }
+                          100% { opacity: .6; transform: scale(1); } }
+@keyframes rwiLine      { to { stroke-dashoffset: 0; opacity: 1; } }
+@keyframes rwiWordIn    { to { opacity: 1; transform: translateY(0); } }
+@keyframes rwiTagIn     { to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  #rewireIntro { display: none; }
+}

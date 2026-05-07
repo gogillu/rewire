@@ -49,8 +49,11 @@ VIBES = ["humour", "emotional", "controversial", "sad", "happy", "impossible"]
 MODELS = ["gpt-5.4-mini", "claude-haiku-4.5", "claude-sonnet-4.6"]
 
 # Fewer-than-12-word alternate endings, tagged by vibe.
+# v1.5: prompt is region-agnostic (Bollywood + Hollywood + TV) and pushes
+# for VISCERAL, EXTREME endings. The user wanted endings that hit hard,
+# never feel templated.
 PROMPT_TMPL = """\
-You are writing short, punchy alternate endings for the Bollywood movie
+You are writing short, VISCERAL alternate endings for the title
 "{title}" ({year}, {genre}).
 
 Synopsis: {synopsis}
@@ -58,25 +61,27 @@ Actual ending: {actual}
 
 Write **exactly 3** alternate endings with the vibe: **{vibe_label}**.
 Each ending MUST be:
-  - ≤ 12 words.
+  - ≤ 12 words. Punchy. No fat.
   - A complete declarative sentence ending with a period.
-  - Distinctly different in tone/event from the others.
-  - Specifically about THIS movie's characters/setting (use names).
+  - Distinctly different from the others — different *event*, not just rephrased.
+  - Specifically about THIS title's characters/setting (use real names).
   - Vibe = {vibe_label}: {vibe_hint}.
+  - INTENSE. Make the reader's brain twitch. No safe, hedged, generic lines.
 
 Do NOT explain. Do NOT use bullets. Do NOT number them in the output.
+Do NOT add "Variant 1:" or labels. Just the JSON.
 Output strictly as JSON:
 
 {{"endings": ["sentence one.", "sentence two.", "sentence three."]}}
 """
 
 VIBE_HINTS = {
-    "humour":        "MAXIMUM absurd comedy, surprise, irony — make readers laugh out loud.",
-    "emotional":     "tear-jerking, raw, intimate moment — gut-punch the heart.",
-    "controversial": "edgy, provocative, taboo — daring without being offensive.",
-    "sad":           "tragic, heartbreaking, somber — gentle melancholy or loss.",
-    "happy":         "wholesome, joyous, uplifting — warm sunshine of an ending.",
-    "impossible":    "wildly fantastical, sci-fi, supernatural, reality-bending.",
+    "humour":        "MAXIMUM absurd comedy — slapstick, irony, deadpan twist. Make readers laugh out loud.",
+    "emotional":     "raw, gut-punch intimacy — a tear-jerker line that sneaks past defenses.",
+    "controversial": "edgy, provocative, taboo, polarising — bold without being cruel.",
+    "sad":           "devastating, heartbreaking, quiet tragedy — leave the reader hollow.",
+    "happy":         "wholesome, joyous, miraculous — sunshine of an ending that almost feels unfair.",
+    "impossible":    "reality-bending, sci-fi, supernatural, time-loops, multiversal madness.",
 }
 
 VIBE_LABEL = {
@@ -116,6 +121,36 @@ def load_progress() -> dict:
         except Exception:
             log("progress file corrupted, starting fresh")
     return {}
+
+
+def seed_progress_from_db(progress: dict) -> int:
+    """Pre-fill progress with (movie_id, vibe) pairs already having ≥3
+    variants in the DB. Idempotent. Returns number of pairs newly added.
+    Lets us add new movies/vibes without re-running already-done work after
+    the on-disk progress.json is lost."""
+    import sqlite3
+    db_path = ROOT / "data" / "rewire.db"
+    if not db_path.exists():
+        return 0
+    added = 0
+    try:
+        con = sqlite3.connect(str(db_path))
+        cur = con.cursor()
+        cur.execute("""
+            SELECT movie_id, vibe, COUNT(*) FROM vibe_endings
+            GROUP BY movie_id, vibe HAVING COUNT(*) >= 3
+        """)
+        for movie_id, vibe, _ in cur.fetchall():
+            key = f"{movie_id}|{vibe}"
+            if not progress.get(key, {}).get("ok"):
+                progress[key] = {"ok": True, "model": "preexisting", "ts": int(time.time())}
+                added += 1
+        con.close()
+    except Exception as e:
+        log(f"seed_progress_from_db skipped: {e}")
+    if added:
+        save_progress(progress)
+    return added
 
 
 def save_progress(p: dict) -> None:
@@ -314,6 +349,9 @@ def main() -> None:
     movies = json.loads(movies_file.read_text(encoding="utf-8"))
     log(f"loaded {len(movies)} movies from {movies_file}")
     progress = load_progress()
+    pre_seeded = seed_progress_from_db(progress)
+    if pre_seeded:
+        log(f"pre-seeded progress with {pre_seeded} (movie,vibe) pairs already in DB")
     vibes = [v.strip() for v in args.vibes.split(",") if v.strip() in VIBES]
     log(f"vibes: {vibes}")
 

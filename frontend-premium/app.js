@@ -46,12 +46,15 @@
     cardEls: [],
     likeMap: new Map(),
     vibes: [],           // selected vibes
+    cats: [],            // selected catalog categories (bollywood/hollywood/tv-in/tv-foreign)
     audioOn: false,
     audio: null,
     activeIdx: -1,
     currentSrc: null,
     activeStartedAt: 0,
     cardsViewed: 0,
+    activeMovieId: null, // for community sheet binding
+    activeMovie: null,
   };
 
   // ---------- telemetry ----------
@@ -97,12 +100,12 @@
       return await r.json();
     } catch { return { vibes: [], categories: ['bollywood'] }; }
   }
-  async function savePrefs(vibes) {
+  async function savePrefs(vibes, cats) {
     try {
       await fetch('/api/premium/prefs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Premium-Token': getToken() },
-        body: JSON.stringify({ vibes, categories: ['bollywood'] }),
+        body: JSON.stringify({ vibes: vibes || [], categories: (cats && cats.length) ? cats : ['bollywood'] }),
       });
     } catch {}
   }
@@ -154,10 +157,29 @@
     if (m.poster_url) poster.style.backgroundImage = `url("${m.poster_url}")`;
     card.appendChild(poster);
     const vig = document.createElement('div'); vig.className = 'vignette'; card.appendChild(vig);
+
+    // Top: title + year/rating + Insta-style stats chip (parity with /direct)
     const top = document.createElement('div');
     top.className = 'top';
-    top.innerHTML = `<div class="title">${escapeHTML(m.title)}</div><div class="sub">${m.year || ''} · ★ ${(m.imdb_rating||0).toFixed(1)}</div>`;
+    const views = m.views || 0;
+    const totalLikes = m.likes_total || 0;
+    const conv = (m.conversion_pct != null) ? Number(m.conversion_pct).toFixed(0) : null;
+    let statsHtml = '';
+    if (views > 0 || totalLikes > 0) {
+      statsHtml = `<div class="stats">
+        <span><b>${formatLikes(views)}</b> <em>views</em></span>
+        <span>♥ <b>${formatLikes(totalLikes)}</b></span>
+        ${conv != null ? `<span><b>${conv}%</b> <em>liked</em></span>` : ''}
+      </div>`;
+    }
+    top.innerHTML = `
+      <div class="title">${escapeHTML(m.title)}</div>
+      <div class="sub">${m.year || ''} · ★ ${(m.imdb_rating||0).toFixed(1)}</div>
+      ${statsHtml}
+    `;
     card.appendChild(top);
+
+    // Endings stack
     const wrap = document.createElement('div'); wrap.className = 'endings';
     const liked = state.likeMap.get(m.id);
     const picks = pickThree(m);
@@ -166,15 +188,27 @@
       const key = (e.isVibe ? 'v' : 'c') + ':' + e.id;
       if (liked === key) el.classList.add('liked');
       el.dataset.endingKey = key;
+      // v1.5: no per-ending vibe label — keep the feed clean and let the
+      // vibe come through via the *content* of the line.
       el.innerHTML = `
-        ${e.isVibe ? `<span class="vibe-chip" style="position:absolute;top:8px;left:14px">${escapeHTML(e.vibe)}</span>` : ''}
         <div class="text">${escapeHTML(e.text)}</div>
         <div class="row"><i class="heart"></i><span class="likes">${formatLikes(e.likes||0)}</span></div>
       `;
       el.addEventListener('click', () => onLike(m.id, e, el, card, idx));
       wrap.appendChild(el);
     });
+
+    // Community pill — "+ Write your own ending"
+    const community = document.createElement('div');
+    community.className = 'community-pill';
+    const ccount = (m.community && m.community.count) || 0;
+    community.innerHTML = `<span class="plus">＋</span> Write your own ending` +
+      (ccount > 0 ? ` <span class="pill-count">${formatLikes(ccount)}</span>` : '');
+    community.addEventListener('click', (ev) => { ev.stopPropagation(); openCommunitySheet(m); });
+    wrap.appendChild(community);
+
     card.appendChild(wrap);
+
     const brand = document.createElement('div'); brand.className = 'brand';
     brand.innerHTML = `<div class="logo">Rewire</div>`;
     card.appendChild(brand);
@@ -262,14 +296,18 @@
 
   async function loadLikes() { try { const all = await idbAll('likes'); for (const r of all) state.likeMap.set(r.movieId, r.endingKey); } catch {} }
 
-  // ---------- Vibe panel ----------
-  function openVibePanel() { paintVibePills(); $('#vibePanel').classList.add('open'); track('vibe_panel_open'); }
+  // ---------- Vibe + Categories panel ----------
+  function openVibePanel() { paintVibePills(); paintCatPills(); $('#vibePanel').classList.add('open'); track('vibe_panel_open'); }
   function paintVibePills() {
-    $$('.vibe-pill').forEach(b => b.classList.toggle('on', state.vibes.includes(b.dataset.vibe)));
+    $$('.vibe-pill[data-vibe]').forEach(b => b.classList.toggle('on', state.vibes.includes(b.dataset.vibe)));
+  }
+  function paintCatPills() {
+    $$('.vibe-pill[data-cat]').forEach(b => b.classList.toggle('on', state.cats.includes(b.dataset.cat)));
   }
   function setupVibePanel() {
     $('#vibeBtn').addEventListener('click', openVibePanel);
-    $$('.vibe-pill').forEach(b => b.addEventListener('click', () => {
+    // Vibe pills (max 3 sticky)
+    $$('.vibe-pill[data-vibe]').forEach(b => b.addEventListener('click', () => {
       const v = b.dataset.vibe;
       const i = state.vibes.indexOf(v);
       if (i >= 0) state.vibes.splice(i, 1);
@@ -277,12 +315,140 @@
       else { state.vibes.shift(); state.vibes.push(v); }
       paintVibePills();
     }));
+    // Category pills (multi-select, no cap)
+    $$('.vibe-pill[data-cat]').forEach(b => b.addEventListener('click', () => {
+      const v = b.dataset.cat;
+      const i = state.cats.indexOf(v);
+      if (i >= 0) state.cats.splice(i, 1);
+      else state.cats.push(v);
+      paintCatPills();
+    }));
     $('#vibeSave').addEventListener('click', async () => {
-      track('vibe_save', { extra: { vibes: state.vibes.join(',') } });
-      await savePrefs(state.vibes);
+      track('vibe_save', { extra: { vibes: state.vibes.join(','), cats: state.cats.join(',') } });
+      await savePrefs(state.vibes, state.cats);
       $('#vibePanel').classList.remove('open');
-      // Re-fetch with new vibes.
+      // Re-fetch with new prefs.
       try { const j = await fetchMovies(); applyMovies(j); } catch {}
+    });
+  }
+
+  // ---------- Community endings sheet ----------
+  // The /api/community/* endpoints are NOT premium-gated on the backend, so
+  // we can reuse them as-is.
+  async function openCommunitySheet(m) {
+    state.activeMovieId = m.id;
+    state.activeMovie = m;
+    track('community_open', { movie_id: m.id });
+    $('#communityTitle').textContent = 'Community endings · ' + m.title;
+    $('#communityList').innerHTML = '<div style="opacity:.5;font-size:13px;padding:8px 0">Loading…</div>';
+    $('#communitySheet').classList.add('open');
+    $('#communityText').value = '';
+    try {
+      const r = await fetch('/api/community/endings?movie_id=' + encodeURIComponent(m.id));
+      if (!r.ok) { $('#communityList').innerHTML = '<div style="opacity:.5;font-size:13px;padding:8px 0">No entries yet — be the first.</div>'; return; }
+      const j = await r.json();
+      const items = j.items || [];
+      if (items.length === 0) {
+        $('#communityList').innerHTML = '<div style="opacity:.5;font-size:13px;padding:8px 0">No entries yet — be the first.</div>';
+      } else {
+        $('#communityList').innerHTML = items.map(buildCommunityItem).join('');
+        bindCommunityItemHandlers();
+      }
+    } catch (e) {
+      $('#communityList').innerHTML = '<div style="opacity:.5;font-size:13px;padding:8px 0">Couldn\'t load: ' + escapeHTML(e.message) + '</div>';
+    }
+  }
+  function buildCommunityItem(it) {
+    const liked = communityIsLiked(it.id);
+    const myRating = communityMyRating(it.id);
+    const stars = [1,2,3,4,5].map(n => `<span class="${n <= myRating ? 'filled' : ''}" data-rating="${n}">★</span>`).join('');
+    return `<div class="ce-item" data-id="${it.id}">
+      <div class="ce-text">${escapeHTML(it.text)}</div>
+      <div class="ce-meta">
+        <span class="author">${escapeHTML(it.author || 'anon')}</span>
+        <span class="heart-mini ${liked ? 'liked' : ''}" data-action="like">♥ <span class="ce-likes">${formatLikes(it.likes || 0)}</span></span>
+        <div class="stars" data-action="rate">${stars}</div>
+      </div>
+    </div>`;
+  }
+  function bindCommunityItemHandlers() {
+    $$('#communityList .ce-item').forEach(item => {
+      const id = +item.dataset.id;
+      const heart = item.querySelector('.heart-mini');
+      if (heart) heart.addEventListener('click', () => communityLike(id, item));
+      item.querySelectorAll('.stars span').forEach(s => {
+        s.addEventListener('click', () => communityRate(id, +s.dataset.rating, item));
+      });
+    });
+  }
+  function communityKey(id) { return 'rw_ce_like_' + id; }
+  function communityRateKey(id) { return 'rw_ce_rate_' + id; }
+  function communityIsLiked(id) { try { return localStorage.getItem(communityKey(id)) === '1'; } catch { return false; } }
+  function communityMyRating(id) { try { return parseInt(localStorage.getItem(communityRateKey(id)) || '0', 10); } catch { return 0; } }
+  async function communityLike(id, itemEl) {
+    const wasLiked = communityIsLiked(id);
+    const delta = wasLiked ? -1 : 1;
+    try {
+      const r = await fetch('/api/community/like-ending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ending_id: id, delta }),
+      });
+      if (!r.ok) return;
+      const j = await r.json();
+      try {
+        if (delta > 0) localStorage.setItem(communityKey(id), '1');
+        else localStorage.removeItem(communityKey(id));
+      } catch {}
+      const heart = itemEl.querySelector('.heart-mini');
+      heart.classList.toggle('liked', delta > 0);
+      const span = itemEl.querySelector('.ce-likes');
+      if (span && j.likes != null) span.textContent = formatLikes(j.likes);
+      track('community_like', { movie_id: state.activeMovieId, ending_id: id, extra: { delta } });
+    } catch {}
+  }
+  async function communityRate(id, rating, itemEl) {
+    try {
+      const r = await fetch('/api/community/rate-ending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ending_id: id, rating }),
+      });
+      if (!r.ok) return;
+      try { localStorage.setItem(communityRateKey(id), String(rating)); } catch {}
+      itemEl.querySelectorAll('.stars span').forEach(s => {
+        s.classList.toggle('filled', +s.dataset.rating <= rating);
+      });
+      track('community_rate', { movie_id: state.activeMovieId, ending_id: id, extra: { rating } });
+    } catch {}
+  }
+  async function communitySubmit() {
+    const txt = ($('#communityText').value || '').trim();
+    if (!txt || !state.activeMovieId) return;
+    const author = ($('#communityAuthor').value || '').trim().slice(0, 32);
+    try {
+      $('#communitySubmit').disabled = true;
+      const r = await fetch('/api/community/submit-ending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ movie_id: state.activeMovieId, text: txt.slice(0, 200), author }),
+      });
+      if (!r.ok) { alert('Could not submit (' + r.status + ').'); return; }
+      track('community_submit', { movie_id: state.activeMovieId });
+      $('#communityText').value = '';
+      // Refresh list with new entry on top.
+      openCommunitySheet(state.activeMovie);
+    } catch (e) {
+      alert('Submit failed: ' + e.message);
+    } finally {
+      $('#communitySubmit').disabled = false;
+    }
+  }
+  function setupCommunity() {
+    $('#communityClose').addEventListener('click', () => $('#communitySheet').classList.remove('open'));
+    $('#communitySubmit').addEventListener('click', communitySubmit);
+    $('#communitySheet').addEventListener('click', (e) => {
+      if (e.target.id === 'communitySheet') $('#communitySheet').classList.remove('open');
     });
   }
 
@@ -302,7 +468,7 @@
           <div class="poster" style="background-image:url('${r.poster_url || ''}')"></div>
           <div class="info">
             <div class="t">${escapeHTML(r.title)} <span style="opacity:.55;font-weight:400">${r.year || ''}</span></div>
-            <div class="e"><span class="v">${escapeHTML(r.vibe)}</span>${escapeHTML(r.text)}</div>
+            <div class="e">${escapeHTML(r.text)}</div>
           </div>
           <div class="likes">${formatLikes(r.likes || 0)}</div>
         </div>
@@ -331,6 +497,9 @@
   }
 
   async function boot() {
+    // v1.5 — brain rewire intro before any token gate logic.
+    if (window.RewireIntro) { try { await window.RewireIntro.show(); } catch {} }
+
     // Token from URL ?t= overrides; useful for the email "click to unlock" UX.
     const urlT = new URLSearchParams(location.search).get('t');
     if (urlT) { setToken(urlT); history.replaceState({}, '', '/premium'); }
@@ -353,10 +522,12 @@
     track('premium_open');
     setupVibePanel();
     setupLB();
+    setupCommunity();
     $('#audioBtn').addEventListener('click', () => setAudio(!state.audioOn));
     await loadLikes();
     const prefs = await fetchPrefs();
     state.vibes = prefs.vibes || [];
+    state.cats  = (prefs.categories && prefs.categories.length) ? prefs.categories : ['bollywood'];
     try {
       const j = await fetchMovies();
       applyMovies(j);

@@ -45,6 +45,10 @@ type Movie struct {
 	LikesTotal    int64             `json:"likes_total"`
 	ConversionPct float64           `json:"conversion_pct"`
 	Community     []CommunityEnding `json:"community,omitempty"`
+	// v1.5.0: global catalog tags. Default 'bollywood' / 'movie' to keep
+	// existing 100 titles compatible. Premium filters on these.
+	Region        string            `json:"region,omitempty"`
+	Kind          string            `json:"kind,omitempty"`
 }
 
 type CommunityEnding struct {
@@ -154,6 +158,7 @@ func main() {
 	srv.migrateAddModeColumn()
 	srv.migrateRichGeo()
 	srv.migrateRzpColumns()
+	srv.migrateGlobalColumns() // v1.5.0: region + kind on movies
 	if secret, err := srv.loadOrCreateSecret(); err != nil {
 		log.Fatalf("rewire: premium secret: %v", err)
 	} else {
@@ -302,7 +307,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // /api/version (JSON) and embedded in /api/movies app_version. We bump this
 // at every shipped release so users / debug tools can see what's actually
 // deployed (per rubber-duck #10).
-const appBuildVersion = "1.4.4"
+const appBuildVersion = "1.5.0"
 
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -444,7 +449,8 @@ func (s *Server) bustCache() {
 func (s *Server) loadMovies(ctx context.Context) ([]Movie, error) {
 	rows, err := s.db.QueryContext(ctx, `
         SELECT id, title, year, imdb_rating, genre, synopsis,
-               actual_ending, poster_url, backdrop_url, youtube_id
+               actual_ending, poster_url, backdrop_url, youtube_id,
+               COALESCE(region,'bollywood'), COALESCE(kind,'movie')
         FROM movies
         ORDER BY sort_order ASC, imdb_rating DESC, year DESC
     `)
@@ -458,7 +464,8 @@ func (s *Server) loadMovies(ctx context.Context) ([]Movie, error) {
 	for rows.Next() {
 		var m Movie
 		if err := rows.Scan(&m.ID, &m.Title, &m.Year, &m.IMDBRating, &m.Genre,
-			&m.Synopsis, &m.ActualEnding, &m.PosterURL, &m.BackdropURL, &m.YouTubeID); err != nil {
+			&m.Synopsis, &m.ActualEnding, &m.PosterURL, &m.BackdropURL, &m.YouTubeID,
+			&m.Region, &m.Kind); err != nil {
 			return nil, err
 		}
 		m.Endings = []Ending{}
@@ -580,22 +587,26 @@ func (s *Server) seedMovies(path string) error {
 	defer tx.Rollback()
 	stmt, err := tx.Prepare(`
         INSERT INTO movies (id, title, year, imdb_rating, genre, synopsis,
-                            actual_ending, poster_url, backdrop_url, youtube_id, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            actual_ending, poster_url, backdrop_url, youtube_id, sort_order,
+                            region, kind)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title, year=excluded.year, imdb_rating=excluded.imdb_rating,
             genre=excluded.genre, synopsis=excluded.synopsis,
             actual_ending=excluded.actual_ending, poster_url=excluded.poster_url,
             backdrop_url=excluded.backdrop_url, youtube_id=excluded.youtube_id,
-            sort_order=excluded.sort_order
+            sort_order=excluded.sort_order,
+            region=excluded.region, kind=excluded.kind
     `)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 	for i, m := range movies {
+		region, kind := regionKindAllowed(m.Region, m.Kind)
 		if _, err := stmt.Exec(m.ID, m.Title, m.Year, m.IMDBRating, m.Genre, m.Synopsis,
-			m.ActualEnding, m.PosterURL, m.BackdropURL, m.YouTubeID, i); err != nil {
+			m.ActualEnding, m.PosterURL, m.BackdropURL, m.YouTubeID, i,
+			region, kind); err != nil {
 			return err
 		}
 	}

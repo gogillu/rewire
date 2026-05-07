@@ -775,6 +775,7 @@ body.nudge-open { overflow: hidden; }
 #empty.show { display: flex; }
 #empty p { opacity: .6; max-width: 360px; line-height: 1.5; }
 </style>
+<link rel="stylesheet" href="/rewire-intro.css?v=1.5.0">
 </head>
 <body>
 <div id="splash">
@@ -878,7 +879,8 @@ body.nudge-open { overflow: hidden; }
   </div>
 </div>
 
-<script src="/app.js?v=1.3.4"></script>
+<script src="/rewire-intro.js?v=1.5.0"></script>
+<script src="/app.js?v=1.5.0"></script>
 <script>
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js?v=1.3.4').catch(()=>{});

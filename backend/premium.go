@@ -243,8 +243,12 @@ func tokenHashFromReq(r *http.Request) string {
 
 // handlePremiumMovies — token-required. Returns movies with classic +
 // vibe-tagged endings filtered by the user's vibe selection (if any).
-// The classic 3 endings are always included so first-time premium users
-// see content even before they pick vibes.
+// v1.5.0: filters by region/kind based on user's `categories` prefs.
+//   bollywood   → region=bollywood,  kind=movie
+//   hollywood   → region=hollywood,  kind=movie
+//   tv-in       → region=bollywood,  kind=tv
+//   tv-foreign  → region∈{hollywood,world}, kind=tv
+// Defaults to bollywood when prefs are empty (backwards compatible).
 func (s *Server) handlePremiumMovies(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if _, ok := s.requirePremium(r); !ok {
@@ -252,15 +256,21 @@ func (s *Server) handlePremiumMovies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hash := tokenHashFromReq(r)
-	var vibesCSV string
+	var vibesCSV, catsCSV string
 	_ = s.db.QueryRowContext(r.Context(),
-		`SELECT vibes FROM premium_prefs WHERE token_hash = ?`, hash).Scan(&vibesCSV)
+		`SELECT vibes, COALESCE(categories,'') FROM premium_prefs WHERE token_hash = ?`,
+		hash).Scan(&vibesCSV, &catsCSV)
 	vibes := splitCSV(vibesCSV)
+	cats := splitCSV(catsCSV)
+	if len(cats) == 0 {
+		cats = []string{"bollywood"}
+	}
 	movies, err := s.loadMovies(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	movies = filterMoviesByCategories(movies, cats)
 	type vibeEnding struct {
 		Ending
 		Vibe string `json:"vibe,omitempty"`
@@ -283,10 +293,11 @@ func (s *Server) handlePremiumMovies(w http.ResponseWriter, r *http.Request) {
 		out = append(out, row)
 	}
 	body, _ := json.Marshal(map[string]any{
-		"movies":    out,
-		"generated": time.Now().UTC().Format(time.RFC3339),
-		"count":     len(out),
-		"vibes":     vibes,
+		"movies":     out,
+		"generated":  time.Now().UTC().Format(time.RFC3339),
+		"count":      len(out),
+		"vibes":      vibes,
+		"categories": cats,
 	})
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_, _ = w.Write(body)
