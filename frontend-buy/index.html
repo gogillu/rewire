@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0a0f">
 <title>Rewire Premium — ₹9 lifetime</title>
+<!-- v1.4.0: Razorpay checkout for true tap-and-pay UPI -->
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <style>
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
@@ -241,28 +243,37 @@ a { color: #ff8a00; }
       <span style="font-size:12px;opacity:.55">Order: <span id="orderRef"></span></span>
     </p>
 
-    <!-- v1.3.4: PRIMARY — direct UPI deeplink. Mobile path: opens any UPI app
-         with amount prefilled. Desktop path: scan the QR below from your UPI
-         app's Scan-button (live scan; bypasses PhonePe's gallery-QR limits). -->
-    <a class="btn" id="upiBtn" href="#" target="_blank" rel="noopener" style="font-size:16px;padding:18px;">
-      📱 Pay ₹9 with UPI app
-    </a>
-
-    <!-- QR is now ALWAYS VISIBLE (not in a "More options" expander). On
-         desktop this is THE only way to pay; on mobile it's optional. -->
-    <p class="muted" style="text-align:center;margin:14px 0 6px;font-size:12px">
-      …or scan with any UPI app:
+    <!-- v1.4.0: PRIMARY = Razorpay checkout (real tap-and-pay UPI; opens
+         PhonePe / GPay / Paytm with merchant identity verified, no security
+         warnings, no ₹2,000 cap). On success the token is auto-issued — no
+         "I've paid" claim button needed. -->
+    <button class="btn" id="rzpBtn" style="font-size:17px;padding:20px;background:linear-gradient(135deg,#3399ff,#0066ff);">
+      ⚡ Pay ₹9 — instant unlock
+    </button>
+    <p class="muted" style="text-align:center;margin-top:6px;font-size:12px;opacity:.7">
+      Secure UPI payment · token unlocked + emailed automatically
     </p>
-    <div class="qr">
-      <img id="qrImg" src="" alt="UPI QR — ₹9 prefilled">
+
+    <!-- FALLBACK row, only shown when Razorpay isn't configured. The
+         existing direct-deeplink + manual claim flow stays intact for
+         self-host. -->
+    <div id="fallbackPay" style="display:none;margin-top:24px;padding-top:18px;border-top:1px solid rgba(255,255,255,.08)">
+      <p class="muted" style="text-align:center;margin-bottom:10px;font-size:11.5px;letter-spacing:.4px;text-transform:uppercase;opacity:.55">
+        Or pay manually
+      </p>
+      <a class="btn" id="upiBtn" href="#" target="_blank" rel="noopener" style="font-size:15px;padding:16px;background:rgba(255,255,255,.06);">
+        📱 Pay ₹9 with UPI app
+      </a>
+      <div class="qr" style="margin-top:14px">
+        <img id="qrImg" src="" alt="UPI QR — ₹9 prefilled">
+      </div>
+      <button class="btn" id="claimBtn" style="margin-top:10px;background:linear-gradient(135deg,#22c55e,#16a34a);">
+        ✨ I've paid — unlock now
+      </button>
     </div>
 
-    <button class="btn" id="claimBtn" style="margin-top:10px;background:linear-gradient(135deg,#22c55e,#16a34a);font-size:16px;padding:18px;">
-      ✨ I've paid — unlock now
-    </button>
-
     <p class="muted" style="margin-top:14px;font-size:11.5px;line-height:1.5;text-align:center;opacity:.55">
-      Token unlocked instantly + emailed. We reconcile against bank statement within 24 h; mismatched payments are revoked + you're notified.
+      Powered by Razorpay · disputes: <a href="mailto:admin@gogillu.live" style="color:inherit">admin@gogillu.live</a>
     </p>
   </section>
 
@@ -305,7 +316,7 @@ a { color: #ff8a00; }
     <div class="small-link"><a href="#" id="backFromRecover">← back</a></div>
   </section>
 </div>
-<script src="/buy/app.js"></script>
+<script src="/buy/app.js?v=1.4.0"></script>
 </body>
 </html>
 

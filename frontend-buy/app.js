@@ -88,6 +88,7 @@
       });
       if (!r.ok) throw new Error(await r.text());
       order = await r.json();
+      order.email = e1; // remember for Razorpay prefill
       localStorage.setItem('rw_buy_order', JSON.stringify(order));
       $('#orderRef').textContent = order.order_id;
       $('#upiBtn').href = order.deep_link;
@@ -130,7 +131,128 @@
   });
 
   // ---------- Step 2 — pay ----------
-  // v1.3.4: Stripped UTR + copy-VPA chrome. Just two buttons + a QR.
+  // v1.4.0: Razorpay primary, manual UPI deeplink fallback.
+
+  // Detect whether Razorpay is configured server-side. Hide the manual
+  // fallback panel when it is (Razorpay alone is enough). Show fallback
+  // only on test rigs / self-hosts where REWIRE_RZP_KEY_ID is absent.
+  let RZP_KEY_ID = null;
+  let RZP_ENABLED = false;
+  fetch('/api/version').then(r => r.ok ? r.json() : null).then(j => {
+    if (j && j.rzp_enabled && j.rzp_key_id) {
+      RZP_ENABLED = true;
+      RZP_KEY_ID = j.rzp_key_id;
+      const fb = $('#fallbackPay');
+      if (fb) fb.style.display = 'none';
+    } else {
+      const fb = $('#fallbackPay');
+      if (fb) fb.style.display = 'block';
+      const rzpBtn = $('#rzpBtn');
+      if (rzpBtn) rzpBtn.style.display = 'none';
+    }
+  }).catch(() => {
+    // If /api/version fails, fall back gracefully.
+    const fb = $('#fallbackPay');
+    if (fb) fb.style.display = 'block';
+  });
+
+  $('#rzpBtn').addEventListener('click', async () => {
+    if (!order) { alert('Lost order context. Please refresh.'); return; }
+    if (!window.Razorpay) {
+      alert('Razorpay checkout failed to load. Please retry, or use the manual UPI option below.');
+      const fb = $('#fallbackPay');
+      if (fb) fb.style.display = 'block';
+      return;
+    }
+    $('#rzpBtn').disabled = true;
+    $('#rzpBtn').textContent = 'Opening payment…';
+    track('buy_rzp_clicked');
+    try {
+      const r = await fetch('/api/buy/rzp-order', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: order.order_id }),
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        throw new Error(txt || 'rzp-order failed');
+      }
+      const j = await r.json();
+      if (j.already_paid) {
+        // Re-poll status to retrieve token.
+        startPolling();
+        show('pending');
+        return;
+      }
+
+      const opts = {
+        key: j.key_id || RZP_KEY_ID,
+        amount: j.amount,
+        currency: j.currency || 'INR',
+        order_id: j.rzp_order_id,
+        name: 'Rewire',
+        description: 'Premium · Lifetime',
+        prefill: { email: (order && order.email) || '' },
+        theme: { color: '#ff007a' },
+        method: { upi: true, card: false, netbanking: false, wallet: false, paylater: false, emi: false },
+        handler: async (resp) => {
+          // Success path. Verify on server, get token.
+          track('buy_rzp_success', { extra: { rzp_payment_id: resp.razorpay_payment_id } });
+          try {
+            const vr = await fetch('/api/buy/rzp-verify', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                order_id: order.order_id,
+                rzp_order_id: resp.razorpay_order_id,
+                rzp_payment_id: resp.razorpay_payment_id,
+                rzp_signature: resp.razorpay_signature,
+              }),
+            });
+            if (!vr.ok) throw new Error(await vr.text());
+            const vj = await vr.json();
+            if (vj.token) {
+              localStorage.setItem('rw_premium_token', vj.token);
+              $('#tokenBox').textContent = vj.token;
+            }
+            track('buy_token_unlocked');
+            show('done');
+          } catch (err) {
+            alert('Payment succeeded but verification failed: ' + (err.message || err) +
+                  '\n\nWe will reconcile and email your token to ' + ((order && order.email) || 'you') +
+                  ' shortly. For urgent help: admin@gogillu.live');
+            show('pending');
+            startPolling();
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            track('buy_rzp_dismissed');
+            $('#rzpBtn').disabled = false;
+            $('#rzpBtn').textContent = '⚡ Pay ₹9 — instant unlock';
+          },
+        },
+      };
+      const rzp = new Razorpay(opts);
+      rzp.on('payment.failed', (resp) => {
+        track('buy_rzp_failed', { extra: { code: resp.error?.code, reason: resp.error?.reason } });
+        alert('Payment failed: ' + (resp.error?.description || 'unknown') +
+              '\n\nReason: ' + (resp.error?.reason || '') +
+              '\n\nTry again, or use the manual UPI option below.');
+        const fb = $('#fallbackPay');
+        if (fb) fb.style.display = 'block';
+        $('#rzpBtn').disabled = false;
+        $('#rzpBtn').textContent = '⚡ Pay ₹9 — instant unlock';
+      });
+      rzp.open();
+    } catch (err) {
+      alert('Could not start payment: ' + (err.message || err));
+      $('#rzpBtn').disabled = false;
+      $('#rzpBtn').textContent = '⚡ Pay ₹9 — instant unlock';
+      const fb = $('#fallbackPay');
+      if (fb) fb.style.display = 'block';
+    }
+  });
+
+  // Fallback chain (only visible if Razorpay not configured / failed).
   $('#upiBtn').addEventListener('click', () => track('buy_upi_app_clicked'));
 
   // v1.2: One-tap honor claim. Token is minted + emailed instantly; admin
