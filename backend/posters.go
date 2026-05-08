@@ -37,8 +37,14 @@ type wikiSummary struct {
 }
 
 func (s *Server) backfillPosters(ctx context.Context) {
+	// v1.5.1 — clear stale "none" sentinels so the new region/kind-aware
+	// resolver gets another shot at the 50+ Hollywood/TV stragglers that
+	// the v1.5.0 Bollywood-only variant list could not find.
+	_, _ = s.db.ExecContext(ctx, `UPDATE movies SET poster_url = '' WHERE poster_url = 'none'`)
+
 	rows, err := s.db.QueryContext(ctx, `
-        SELECT id, title, year FROM movies
+        SELECT id, title, year, COALESCE(region,'bollywood'), COALESCE(kind,'movie')
+        FROM movies
         WHERE poster_url IS NULL OR poster_url = ''
     `)
 	if err != nil {
@@ -46,13 +52,13 @@ func (s *Server) backfillPosters(ctx context.Context) {
 		return
 	}
 	type pending struct {
-		ID, Title string
-		Year      int
+		ID, Title, Region, Kind string
+		Year                    int
 	}
 	var todo []pending
 	for rows.Next() {
 		var p pending
-		if err := rows.Scan(&p.ID, &p.Title, &p.Year); err == nil {
+		if err := rows.Scan(&p.ID, &p.Title, &p.Year, &p.Region, &p.Kind); err == nil {
 			todo = append(todo, p)
 		}
 	}
@@ -69,7 +75,12 @@ func (s *Server) backfillPosters(ctx context.Context) {
 			return
 		default:
 		}
-		url, _ := fetchWikiPoster(client, p.Title, p.Year)
+		url := ""
+		if hard, ok := posterOverrides[p.ID]; ok && hard != "" {
+			url = hard
+		} else {
+			url, _ = fetchWikiPoster(client, p.Title, p.Year, p.Region, p.Kind)
+		}
 		if url == "" {
 			// Mark as attempted so we don't retry on every boot. Use a
 			// known sentinel — empty string already triggers retry, so
@@ -92,21 +103,65 @@ func (s *Server) backfillPosters(ctx context.Context) {
 	log.Printf("rewire: poster backfill done")
 }
 
-func fetchWikiPoster(client *http.Client, title string, year int) (string, error) {
-	// Title variants from most to least specific. "Foo (YYYY film)" is the
-	// canonical form for movies that share a name with another work.
+func fetchWikiPoster(client *http.Client, title string, year int, region, kind string) (string, error) {
+	// Title variants — region+kind aware. Wikipedia disambig parents keep
+	// stray pages like "Schindler's List" pointing at the article (no suffix
+	// needed) but TV and Hollywood movies more often need a qualifier.
 	variants := []string{}
-	if year > 0 {
-		variants = append(variants, fmt.Sprintf("%s (%d film)", title, year))
-		variants = append(variants, fmt.Sprintf("%s (%d Hindi film)", title, year))
-		variants = append(variants, fmt.Sprintf("%s (%d Indian film)", title, year))
+	if kind == "tv" {
+		if year > 0 {
+			variants = append(variants, fmt.Sprintf("%s (%d TV series)", title, year))
+		}
+		switch region {
+		case "bollywood":
+			variants = append(variants,
+				fmt.Sprintf("%s (Indian TV series)", title),
+				fmt.Sprintf("%s (Hindi TV series)", title),
+				fmt.Sprintf("%s (web series)", title),
+				fmt.Sprintf("%s (Indian web series)", title),
+			)
+		case "hollywood":
+			variants = append(variants,
+				fmt.Sprintf("%s (American TV series)", title),
+				fmt.Sprintf("%s (British TV series)", title),
+			)
+		case "world":
+			variants = append(variants,
+				fmt.Sprintf("%s (South Korean TV series)", title),
+				fmt.Sprintf("%s (Spanish TV series)", title),
+				fmt.Sprintf("%s (German TV series)", title),
+			)
+		}
+		variants = append(variants,
+			fmt.Sprintf("%s (TV series)", title),
+			title,
+		)
+	} else {
+		if year > 0 {
+			variants = append(variants, fmt.Sprintf("%s (%d film)", title, year))
+		}
+		switch region {
+		case "bollywood":
+			variants = append(variants,
+				fmt.Sprintf("%s (Hindi film)", title),
+				fmt.Sprintf("%s (Indian film)", title),
+			)
+		case "hollywood":
+			variants = append(variants,
+				fmt.Sprintf("%s (American film)", title),
+				fmt.Sprintf("%s (British film)", title),
+			)
+		case "world":
+			variants = append(variants,
+				fmt.Sprintf("%s (South Korean film)", title),
+				fmt.Sprintf("%s (Spanish film)", title),
+			)
+		}
+		variants = append(variants,
+			fmt.Sprintf("%s (film)", title),
+			title,
+		)
 	}
-	variants = append(variants,
-		fmt.Sprintf("%s (film)", title),
-		fmt.Sprintf("%s (Hindi film)", title),
-		fmt.Sprintf("%s (Indian film)", title),
-		title,
-	)
 	for _, v := range variants {
 		path := url.PathEscape(strings.ReplaceAll(v, " ", "_"))
 		api := "https://en.wikipedia.org/api/rest_v1/page/summary/" + path

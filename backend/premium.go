@@ -347,8 +347,10 @@ func (s *Server) handlePremiumLike(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePremiumLeaderboard — token required. Returns top vibe endings
-// across all movies with movie context. Used for the premium leaderboard
-// page (movies + their highest-liked alternative endings).
+// per (region, kind) bucket so the user sees a balanced leaderboard
+// instead of one region dominating. Up to 15 endings per bucket; the
+// frontend renders section headers between buckets via the `bucket`
+// field.
 func (s *Server) handlePremiumLeaderboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if _, ok := s.requirePremium(r); !ok {
@@ -356,11 +358,12 @@ func (s *Server) handlePremiumLeaderboard(w http.ResponseWriter, r *http.Request
 		return
 	}
 	rows, err := s.db.QueryContext(r.Context(), `
-        SELECT v.id, v.movie_id, v.vibe, v.text, v.likes, m.title, m.year, m.poster_url
+        SELECT v.id, v.movie_id, v.vibe, v.text, v.likes,
+               m.title, m.year, m.poster_url,
+               COALESCE(m.region,'bollywood'), COALESCE(m.kind,'movie')
         FROM vibe_endings v
         JOIN movies m ON m.id = v.movie_id
         ORDER BY v.likes DESC, v.id ASC
-        LIMIT 200
     `)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -376,17 +379,78 @@ func (s *Server) handlePremiumLeaderboard(w http.ResponseWriter, r *http.Request
 		Title     string `json:"title"`
 		Year      int    `json:"year"`
 		PosterURL string `json:"poster_url"`
+		Region    string `json:"region"`
+		Kind      string `json:"kind"`
+		Bucket    string `json:"bucket"` // "bollywood-movie" | "bollywood-tv" | "hollywood-movie" | "hollywood-tv" | "world"
+		Label     string `json:"label"`  // human-readable section title
 	}
-	var out []row
+	bucketOrder := []string{"bollywood-movie", "hollywood-movie", "bollywood-tv", "hollywood-tv", "world"}
+	bucketLabels := map[string]string{
+		"bollywood-movie": "🇮🇳 Bollywood Films",
+		"hollywood-movie": "🌍 Hollywood Films",
+		"bollywood-tv":    "📺 Indian Series",
+		"hollywood-tv":    "📺 International Series",
+		"world":           "🎌 World Cinema",
+	}
+	const perBucket = 15
+	buckets := map[string][]row{}
+	moviesSeenInBucket := map[string]map[string]bool{}
+	for _, b := range bucketOrder {
+		moviesSeenInBucket[b] = map[string]bool{}
+	}
 	for rows.Next() {
 		var rr row
 		if err := rows.Scan(&rr.EndingID, &rr.MovieID, &rr.Vibe, &rr.Text, &rr.Likes,
-			&rr.Title, &rr.Year, &rr.PosterURL); err != nil {
+			&rr.Title, &rr.Year, &rr.PosterURL, &rr.Region, &rr.Kind); err != nil {
 			continue
 		}
-		out = append(out, rr)
+		region, kind := regionKindAllowed(rr.Region, rr.Kind)
+		var b string
+		switch {
+		case region == "bollywood" && kind == "movie":
+			b = "bollywood-movie"
+		case region == "hollywood" && kind == "movie":
+			b = "hollywood-movie"
+		case region == "bollywood" && kind == "tv":
+			b = "bollywood-tv"
+		case region == "hollywood" && kind == "tv":
+			b = "hollywood-tv"
+		default:
+			b = "world"
+		}
+		// Cap each bucket at perBucket and ensure each movie shows at
+		// most ONE entry per bucket (highest-liked wins) so a single
+		// movie can't crowd out the rest.
+		if len(buckets[b]) >= perBucket {
+			continue
+		}
+		if moviesSeenInBucket[b][rr.MovieID] {
+			continue
+		}
+		moviesSeenInBucket[b][rr.MovieID] = true
+		rr.Region = region
+		rr.Kind = kind
+		rr.Bucket = b
+		rr.Label = bucketLabels[b]
+		buckets[b] = append(buckets[b], rr)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rows": out})
+	out := make([]row, 0, perBucket*len(bucketOrder))
+	sectionLabels := []map[string]any{}
+	for _, b := range bucketOrder {
+		if len(buckets[b]) == 0 {
+			continue
+		}
+		sectionLabels = append(sectionLabels, map[string]any{
+			"bucket": b,
+			"label":  bucketLabels[b],
+			"count":  len(buckets[b]),
+		})
+		out = append(out, buckets[b]...)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"rows":     out,
+		"sections": sectionLabels,
+	})
 }
 
 // handlePremiumFrontend — serves frontend-premium/. Always accessible (the

@@ -307,7 +307,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // /api/version (JSON) and embedded in /api/movies app_version. We bump this
 // at every shipped release so users / debug tools can see what's actually
 // deployed (per rubber-duck #10).
-const appBuildVersion = "1.5.0"
+const appBuildVersion = "1.5.1"
 
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -341,6 +341,19 @@ func (s *Server) handleMovies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// v1.5.1 — /api/movies feeds the public /direct, /sagar, /abhinav,
+	// /1.0.0 frontends. None of those have audio or classic endings for
+	// Hollywood/TV titles, so the global catalog stays Bollywood-movie-
+	// only here. Premium gets the unfiltered catalog via /api/premium/*.
+	bolly := movies[:0]
+	for _, m := range movies {
+		region, kind := regionKindAllowed(m.Region, m.Kind)
+		if region == "bollywood" && kind == "movie" {
+			bolly = append(bolly, m)
+		}
+	}
+	movies = bolly
+
 	// Optional shuffle seed via ?seed= so the client can re-shuffle without
 	// the server having to track sessions. Default = stable IMDB order.
 	if seed := r.URL.Query().Get("seed"); seed != "" {
@@ -351,7 +364,7 @@ func (s *Server) handleMovies(w http.ResponseWriter, r *http.Request) {
 		"movies":      movies,
 		"generated":   time.Now().UTC().Format(time.RFC3339),
 		"count":       len(movies),
-		"app_version": "1.2.0",
+		"app_version": "1.5.1",
 	})
 	s.cacheMu.Lock()
 	s.cacheJSON = body
@@ -593,8 +606,12 @@ func (s *Server) seedMovies(path string) error {
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title, year=excluded.year, imdb_rating=excluded.imdb_rating,
             genre=excluded.genre, synopsis=excluded.synopsis,
-            actual_ending=excluded.actual_ending, poster_url=excluded.poster_url,
-            backdrop_url=excluded.backdrop_url, youtube_id=excluded.youtube_id,
+            actual_ending=excluded.actual_ending,
+            -- v1.5.1: only overwrite media URLs when the seed JSON ships a
+            -- non-empty value, otherwise preserve the DB-backfilled poster.
+            poster_url   = CASE WHEN COALESCE(excluded.poster_url,'')   != '' THEN excluded.poster_url   ELSE movies.poster_url   END,
+            backdrop_url = CASE WHEN COALESCE(excluded.backdrop_url,'') != '' THEN excluded.backdrop_url ELSE movies.backdrop_url END,
+            youtube_id   = CASE WHEN COALESCE(excluded.youtube_id,'')   != '' THEN excluded.youtube_id   ELSE movies.youtube_id   END,
             sort_order=excluded.sort_order,
             region=excluded.region, kind=excluded.kind
     `)

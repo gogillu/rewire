@@ -452,7 +452,7 @@
     });
   }
 
-  // ---------- Leaderboard panel ----------
+  // ---------- Leaderboard panel (v1.5.1: bucketed) ----------
   async function openLBPanel() {
     track('lb_open');
     $('#lbPanel').classList.add('open');
@@ -461,18 +461,31 @@
       const r = await fetch('/api/premium/leaderboard', { headers: { 'X-Premium-Token': getToken() } });
       if (!r.ok) { $('#lbRows').innerHTML = 'Could not load (' + r.status + ').'; return; }
       const j = await r.json();
-      const rows = (j.rows || []).slice(0, 100);
-      $('#lbRows').innerHTML = rows.map((r, i) => `
-        <div class="lb-row">
-          <div class="pos">${i + 1}</div>
-          <div class="poster" style="background-image:url('${r.poster_url || ''}')"></div>
-          <div class="info">
-            <div class="t">${escapeHTML(r.title)} <span style="opacity:.55;font-weight:400">${r.year || ''}</span></div>
-            <div class="e">${escapeHTML(r.text)}</div>
+      const rows = (j.rows || []);
+      if (!rows.length) { $('#lbRows').innerHTML = 'No endings liked yet — be the first.'; return; }
+      const html = [];
+      let lastBucket = '';
+      let pos = 0;
+      rows.forEach((r) => {
+        if (r.bucket !== lastBucket) {
+          lastBucket = r.bucket;
+          pos = 0;
+          html.push(`<div class="lb-section">${escapeHTML(r.label || '')}</div>`);
+        }
+        pos += 1;
+        html.push(`
+          <div class="lb-row">
+            <div class="pos">${pos}</div>
+            <div class="poster" style="background-image:url('${r.poster_url || ''}')"></div>
+            <div class="info">
+              <div class="t">${escapeHTML(r.title)} <span style="opacity:.55;font-weight:400">${r.year || ''}</span></div>
+              <div class="e">${escapeHTML(r.text)}</div>
+            </div>
+            <div class="likes">${formatLikes(r.likes || 0)}</div>
           </div>
-          <div class="likes">${formatLikes(r.likes || 0)}</div>
-        </div>
-      `).join('');
+        `);
+      });
+      $('#lbRows').innerHTML = html.join('');
     } catch (e) {
       $('#lbRows').innerHTML = 'Error: ' + e.message;
     }

@@ -4,7 +4,7 @@
 // v1.3.0: bigger Instagram-style stats badge, "+" FAB community entry,
 // full-modal premium sales-pitch (with bullet benefits), prominent UPI
 // deeplink CTA on /buy (avoids PhonePe gallery-QR security limits).
-window.REWIRE_VERSION = '1.5.0';
+window.REWIRE_VERSION = '1.5.1';
 console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
 (function () {
   'use strict';

@@ -67,11 +67,14 @@ func (s *Server) handleSagarMovies(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Pull the same movie+endings shape from main.go's helper. We reuse the
-	// cached blob if present so the hot path stays cheap.
+	// cached blob if present so the hot path stays cheap. v1.5.1 — pin to
+	// bollywood-movie; /sagar pre-dates the global catalog.
 	mrows, err := s.db.QueryContext(ctx, `
         SELECT id, title, year, imdb_rating, genre, synopsis,
                actual_ending, poster_url, backdrop_url
         FROM movies
+        WHERE COALESCE(region,'bollywood') = 'bollywood'
+          AND COALESCE(kind,'movie')       = 'movie'
         ORDER BY sort_order ASC, imdb_rating DESC, year DESC
     `)
 	if err != nil {
@@ -190,12 +193,15 @@ func (s *Server) handleSagarLeaderboard(w http.ResponseWriter, r *http.Request) 
 		sortBy = "likes"
 	}
 
-	// Build a unified per-movie aggregate via two cheap queries.
+	// Build a unified per-movie aggregate via two cheap queries. v1.5.1 —
+	// /sagar leaderboard stays Bollywood-movie only (pre-global-catalog).
 	rows, err := s.db.QueryContext(ctx, `
         SELECT m.id, m.title, m.year, m.poster_url,
                COALESCE(SUM(e.likes), 0) AS likes_total
         FROM movies m
         LEFT JOIN endings e ON e.movie_id = m.id
+        WHERE COALESCE(m.region,'bollywood') = 'bollywood'
+          AND COALESCE(m.kind,'movie')       = 'movie'
         GROUP BY m.id, m.title, m.year, m.poster_url
     `)
 	if err != nil {

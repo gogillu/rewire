@@ -297,11 +297,15 @@ type abhinavEnding struct {
 func (s *Server) handleAbhinavMovies(w http.ResponseWriter, r *http.Request) {
 	out := []abhinavContent{}
 
-	// 1) Movies (excluding biopics) from existing tables.
+	// 1) Movies (excluding biopics) from existing tables. v1.5.1 — pin
+	// to bollywood-movie since the abhinav variant pre-dates the global
+	// catalog and its endings/audio are Bollywood-only.
 	mrows, err := s.db.QueryContext(r.Context(), `
         SELECT id, title, year, imdb_rating, genre, synopsis,
                actual_ending, poster_url
         FROM movies
+        WHERE COALESCE(region,'bollywood') = 'bollywood'
+          AND COALESCE(kind,'movie')       = 'movie'
         ORDER BY sort_order ASC, imdb_rating DESC, year DESC
     `)
 	if err != nil {
