@@ -19,6 +19,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -107,6 +108,27 @@ func (s *Server) verifyTokenSignature(raw string) bool {
 	mac.Write(r)
 	want := mac.Sum(nil)
 	return subtle.ConstantTimeCompare(sig, want) == 1
+}
+
+// migratePremiumPrefsAllCats — v1.6.0: existing premium users had their
+// categories silently forced to 'bollywood' (the v1.5.0 default). Premium
+// is paid; they should get the global catalog by default. Bump every row
+// that still matches the old default to all 4 categories. Users who have
+// since explicitly customized their categories list (e.g. picked
+// hollywood-only) won't be touched because their value won't be the
+// bare 'bollywood' string.
+func (s *Server) migratePremiumPrefsAllCats() {
+	res, err := s.db.Exec(
+		`UPDATE premium_prefs SET categories = ? WHERE categories = 'bollywood'`,
+		"bollywood,hollywood,tv-in,tv-foreign",
+	)
+	if err != nil {
+		log.Printf("rewire: migrate premium prefs cats: %v", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		log.Printf("rewire: migrated %d premium_prefs rows from bollywood-only to all-4-categories (v1.6.0)", n)
+	}
 }
 
 // premiumTokenFromRequest extracts the bearer token from any of:
@@ -221,7 +243,8 @@ func (s *Server) handlePremiumPrefsSet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(cats) == 0 {
-		cats = []string{"bollywood"}
+		// v1.6.0 — premium = full access by default
+		cats = []string{"bollywood", "hollywood", "tv-in", "tv-foreign"}
 	}
 	hash := tokenHashFromReq(r)
 	_, _ = s.db.ExecContext(r.Context(), `
@@ -263,7 +286,11 @@ func (s *Server) handlePremiumMovies(w http.ResponseWriter, r *http.Request) {
 	vibes := splitCSV(vibesCSV)
 	cats := splitCSV(catsCSV)
 	if len(cats) == 0 {
-		cats = []string{"bollywood"}
+		// v1.6.0 — premium = full access. Default to ALL 4 categories
+		// when prefs row is missing OR categories column is empty. The
+		// v1.5.0 default of [bollywood] was confusing premium users
+		// because they paid ₹9 and got the same catalog as free.
+		cats = []string{"bollywood", "hollywood", "tv-in", "tv-foreign"}
 	}
 	movies, err := s.loadMovies(r.Context())
 	if err != nil {
@@ -271,6 +298,9 @@ func (s *Server) handlePremiumMovies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	movies = filterMoviesByCategories(movies, cats)
+	// v1.6.0 — hide movies whose vibe pipeline hasn't run yet so users
+	// never see "Rewriting reality..." again. We keep them around in
+	// the leaderboard only when a like has been cast (separate JOIN).
 	type vibeEnding struct {
 		Ending
 		Vibe string `json:"vibe,omitempty"`
@@ -289,6 +319,12 @@ func (s *Server) handlePremiumMovies(w http.ResponseWriter, r *http.Request) {
 				v = vs[i]
 			}
 			row.VibeEndings = append(row.VibeEndings, vibeEnding{Ending: e, Vibe: v})
+		}
+		// Skip cards with neither vibe nor classic endings (in-flight
+		// pipeline, copyright refusals, brand-new title). User asked
+		// not to see "Rewriting reality..." cards anymore.
+		if len(row.VibeEndings) == 0 && len(row.Endings) == 0 {
+			continue
 		}
 		out = append(out, row)
 	}

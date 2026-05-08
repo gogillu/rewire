@@ -445,12 +445,13 @@ func (s *Server) mintAndEmailToken(ctx context.Context, orderID, email string, r
 		`<div style="font-family:system-ui,sans-serif;max-width:540px;margin:0 auto;padding:24px">
 		   <h2 style="margin:0 0 12px">Welcome to Rewire Premium ✨</h2>
 		   <p>Order: <code>%s</code></p>
-		   <p>Your lifetime token (paste this on <a href="https://rewire.gogillu.live/premium">rewire.gogillu.live/premium</a> when prompted):</p>
+		   <p style="margin-top:18px"><a href="https://rewire.gogillu.live/premium?t=%s" style="display:inline-block;background:linear-gradient(90deg,#ff007a,#ff8a00);color:#fff;padding:12px 22px;border-radius:999px;font-weight:700;text-decoration:none">Tap here to unlock Premium →</a></p>
+		   <p style="margin-top:18px">Or paste this lifetime token manually on <a href="https://rewire.gogillu.live/premium">rewire.gogillu.live/premium</a>:</p>
 		   <pre style="background:#111;color:#fff;padding:14px;border-radius:8px;overflow:auto;font-size:13px">%s</pre>
 		   <p style="opacity:.8;font-size:13px">This token never expires. Keep it safe — anyone with the token can use your Premium.<br>
 		   For disputes / lost tokens, reply to this email or write to admin@gogillu.live.</p>
 		 </div>`,
-		orderID, raw)
+		orderID, raw, raw)
 	if _, err := tx.ExecContext(ctx, `
         INSERT INTO email_outbox (kind, order_id, to_addr, subject, html, next_attempt_at, created_at)
         VALUES ('token', ?, ?, ?, ?, ?, ?)
@@ -636,13 +637,14 @@ func (s *Server) handleBuyClaim(w http.ResponseWriter, r *http.Request) {
 		`<div style="font-family:system-ui,sans-serif;max-width:540px;margin:0 auto;padding:24px">
 		   <h2 style="margin:0 0 12px">Welcome to Rewire Premium ✨</h2>
 		   <p>Order: <code>%s</code></p>
-		   <p>Your lifetime token (paste this on <a href="https://rewire.gogillu.live/premium">rewire.gogillu.live/premium</a> when prompted):</p>
+		   <p style="margin-top:18px"><a href="https://rewire.gogillu.live/premium?t=%s" style="display:inline-block;background:linear-gradient(90deg,#ff007a,#ff8a00);color:#fff;padding:12px 22px;border-radius:999px;font-weight:700;text-decoration:none">Tap here to unlock Premium →</a></p>
+		   <p style="margin-top:18px">Or paste this token manually on <a href="https://rewire.gogillu.live/premium">rewire.gogillu.live/premium</a>:</p>
 		   <pre style="background:#111;color:#fff;padding:14px;border-radius:8px;overflow:auto;font-size:13px">%s</pre>
 		   <p style="opacity:.85;font-size:13px">Your payment is being verified against our bank statement (usually within 24 h).
 		     If it can't be matched, the token will be revoked and you'll be notified at this email.</p>
 		   <p style="opacity:.7;font-size:12px">Disputes / lost tokens: reply to this email or write to admin@gogillu.live.</p>
 		 </div>`,
-		b.OrderID, raw)
+		b.OrderID, raw, raw)
 	if _, err := tx.ExecContext(ctx, `
         INSERT INTO email_outbox (kind, order_id, to_addr, subject, html, next_attempt_at, created_at)
         VALUES ('token', ?, ?, ?, ?, ?, ?)
@@ -844,12 +846,13 @@ func (s *Server) handleAdminApprove(w http.ResponseWriter, r *http.Request) {
 		`<div style="font-family:system-ui,sans-serif;max-width:540px;margin:0 auto;padding:24px">
 		   <h2 style="margin:0 0 12px">Welcome to Rewire Premium ✨</h2>
 		   <p>Order: <code>%s</code></p>
-		   <p>Your lifetime token (paste this on <a href="https://rewire.gogillu.live/premium">rewire.gogillu.live/premium</a> when prompted):</p>
+		   <p style="margin-top:18px"><a href="https://rewire.gogillu.live/premium?t=%s" style="display:inline-block;background:linear-gradient(90deg,#ff007a,#ff8a00);color:#fff;padding:12px 22px;border-radius:999px;font-weight:700;text-decoration:none">Tap here to unlock Premium →</a></p>
+		   <p style="margin-top:18px">Or paste this token manually on <a href="https://rewire.gogillu.live/premium">rewire.gogillu.live/premium</a>:</p>
 		   <pre style="background:#111;color:#fff;padding:14px;border-radius:8px;overflow:auto;font-size:13px">%s</pre>
 		   <p style="opacity:.8;font-size:13px">This token never expires. Keep it safe — anyone with the token can use your Premium.<br>
 		   For disputes / lost tokens, reply to this email or write to admin@gogillu.live.</p>
 		 </div>`,
-		b.OrderID, raw)
+		b.OrderID, raw, raw)
 	if _, err := tx.ExecContext(r.Context(), `
         INSERT INTO email_outbox (kind, order_id, to_addr, subject, html, next_attempt_at, created_at)
         VALUES ('token', ?, ?, ?, ?, ?, ?)
@@ -1000,7 +1003,6 @@ func (s *Server) sendEmailViaGod(to, subject, html string) error {
 		"--from-name", "Rewire by GoGillu",
 		"--subject", subject,
 		"--html", html,
-		"--method", "auto",
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

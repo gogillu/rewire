@@ -24,13 +24,15 @@
 
   // ---------- IndexedDB ----------
   const DB_NAME = 'rewire-premium';
+  const DB_VERSION = 2;  // v2 adds 'flags' store (parity with /direct).
   function openDB() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, 1);
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains('likes')) db.createObjectStore('likes', { keyPath: 'movieId' });
         if (!db.objectStoreNames.contains('cache')) db.createObjectStore('cache', { keyPath: 'k' });
+        if (!db.objectStoreNames.contains('flags')) db.createObjectStore('flags', { keyPath: 'movieId' });
       };
       req.onerror = () => reject(req.error);
       req.onsuccess = () => resolve(req.result);
@@ -45,6 +47,8 @@
     movies: [],          // [{id, title, year, ..., classic: [...], vibe: [...]}]
     cardEls: [],
     likeMap: new Map(),
+    flagMap: new Map(),  // movieId -> { reason, customText, ts }
+    pendingFlagMovie: null,
     vibes: [],           // selected vibes
     cats: [],            // selected catalog categories (bollywood/hollywood/tv-in/tv-foreign)
     audioOn: false,
@@ -93,19 +97,27 @@
       return await r.json();
     } catch { return null; }
   }
+  // v1.6.0 — premium = full access. Default cats include all 4 (Bollywood,
+  // Hollywood, Indian TV, World/Foreign TV). User pays ₹9 for the whole
+  // catalog, not just Bollywood.
+  const DEFAULT_CATS = ['bollywood', 'hollywood', 'tv-in', 'tv-foreign'];
+
   async function fetchPrefs() {
     try {
       const r = await fetch('/api/premium/prefs', { headers: { 'X-Premium-Token': getToken() } });
-      if (!r.ok) return { vibes: [], categories: ['bollywood'] };
-      return await r.json();
-    } catch { return { vibes: [], categories: ['bollywood'] }; }
+      if (!r.ok) return { vibes: [], categories: DEFAULT_CATS.slice() };
+      const j = await r.json();
+      // Even if the backend returned an empty list, surface all categories.
+      if (!j.categories || j.categories.length === 0) j.categories = DEFAULT_CATS.slice();
+      return j;
+    } catch { return { vibes: [], categories: DEFAULT_CATS.slice() }; }
   }
   async function savePrefs(vibes, cats) {
     try {
       await fetch('/api/premium/prefs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Premium-Token': getToken() },
-        body: JSON.stringify({ vibes: vibes || [], categories: (cats && cats.length) ? cats : ['bollywood'] }),
+        body: JSON.stringify({ vibes: vibes || [], categories: (cats && cats.length) ? cats : DEFAULT_CATS.slice() }),
       });
     } catch {}
   }
@@ -212,6 +224,19 @@
     const brand = document.createElement('div'); brand.className = 'brand';
     brand.innerHTML = `<div class="logo">Rewire</div>`;
     card.appendChild(brand);
+
+    // v1.6.0: per-card flag button (top-right of card, just left of audio).
+    const flag = document.createElement('button');
+    flag.className = 'flag-btn';
+    if (state.flagMap.has(m.id)) flag.classList.add('flagged');
+    flag.setAttribute('aria-label', 'Report a problem');
+    flag.innerHTML = `<svg viewBox="0 0 24 24"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>`;
+    flag.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      onFlagClick(m.id);
+    });
+    card.appendChild(flag);
+
     return card;
   }
   function render() {
@@ -271,6 +296,7 @@
     }
     state.activeStartedAt = Date.now();
     state.cardsViewed++;
+    maybeShowFeedbackHint();
     const m = state.movies[idx];
     if (!m) return;
     track('card_enter', { movie_id: m.id });
@@ -497,7 +523,150 @@
     const k = b.dataset.close;
     if (k === 'vibe') $('#vibePanel').classList.remove('open');
     if (k === 'lb') $('#lbPanel').classList.remove('open');
+    if (k === 'fb') closeFeedback();
+    if (k === 'flag') closeFlag();
   }));
+
+  // ---------- Toast helper ----------
+  function showToast(text) {
+    const t = document.createElement('div');
+    t.className = 'fb-toast';
+    t.textContent = text;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2000);
+  }
+  function cssEscape(s) { return String(s).replace(/[^a-zA-Z0-9_-]/g, c => '\\' + c); }
+
+  // ---------- Feedback widget (after 3 cards) ----------
+  function maybeShowFeedbackHint() {
+    if (state.cardsViewed < 3) return;
+    const btn = $('#fbBtn');
+    if (!btn || btn.classList.contains('shown')) return;
+    if (localStorage.getItem('rw_fb_until') &&
+        Date.now() < +localStorage.getItem('rw_fb_until')) return;
+    btn.classList.add('shown');
+  }
+  function openFeedback() {
+    track('feedback_open');
+    $('#fbModal').classList.add('open');
+    $('#fbCustomText').value = '';
+    $('#fbCustomWrap').classList.remove('open');
+  }
+  function closeFeedback() { $('#fbModal').classList.remove('open'); }
+  async function submitFeedback(kind, text) {
+    closeFeedback();
+    track('feedback_submit', { extra: { kind, len: (text||'').length } });
+    try {
+      await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: SESSION_ID, anon_id: ANON_ID, kind, text, mode: 'premium' }),
+        keepalive: true,
+      });
+    } catch {}
+    localStorage.setItem('rw_fb_until', String(Date.now() + 24*60*60*1000));
+    $('#fbBtn').classList.remove('shown');
+    showToast('Thanks ✨');
+  }
+  function setupFeedback() {
+    $('#fbBtn').addEventListener('click', openFeedback);
+    $('#fbModal').addEventListener('click', (e) => {
+      if (e.target.id === 'fbModal') closeFeedback();
+    });
+    $$('#fbModal [data-fb]').forEach(b => {
+      b.addEventListener('click', () => {
+        const kind = b.dataset.fb;
+        if (kind === 'other') {
+          $('#fbCustomWrap').classList.add('open');
+          $('#fbCustomText').focus();
+          return;
+        }
+        submitFeedback(kind, '');
+      });
+    });
+    $('#fbCustomSend').addEventListener('click', () => {
+      const txt = $('#fbCustomText').value.trim();
+      if (!txt) return;
+      submitFeedback('custom', txt);
+    });
+  }
+
+  // ---------- Flag widget (per card) ----------
+  async function loadFlags() {
+    try {
+      const all = await idbAll('flags');
+      for (const f of all) state.flagMap.set(f.movieId, f);
+    } catch {}
+  }
+  async function onFlagClick(movieId) {
+    const existing = state.flagMap.get(movieId);
+    if (existing) {
+      const labels = {
+        poster_wrong: 'wrong poster',
+        audio_wrong: 'wrong song / audio',
+        ending_offensive: 'offensive ending',
+        ending_boring: 'weak endings',
+        other: 'feedback',
+      };
+      showToast('Concerns already shared (' + (labels[existing.reason] || 'reported') + ') ✨');
+      return;
+    }
+    state.pendingFlagMovie = movieId;
+    track('flag_open', { movie_id: movieId });
+    $('#flagCustomWrap').classList.remove('open');
+    $('#flagCustomText').value = '';
+    $('#flagModal').classList.add('open');
+  }
+  function closeFlag() {
+    $('#flagModal').classList.remove('open');
+    state.pendingFlagMovie = null;
+  }
+  async function submitFlag(reason, customText) {
+    const movieId = state.pendingFlagMovie;
+    if (!movieId) return;
+    closeFlag();
+    track('flag_submit', { movie_id: movieId, extra: { reason, len: (customText||'').length } });
+    const ts = Date.now();
+    state.flagMap.set(movieId, { movieId, reason, customText: customText || '', ts });
+    try { await idbPut('flags', { movieId, reason, customText: customText || '', ts }); } catch {}
+    $$(`.card[data-movie="${cssEscape(movieId)}"] .flag-btn`).forEach(el => el.classList.add('flagged'));
+    try {
+      await fetch('/api/flag', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: SESSION_ID,
+          anon_id: ANON_ID,
+          mode: 'premium',
+          movie_id: movieId,
+          reason,
+          custom_text: customText || '',
+        }),
+        keepalive: true,
+      });
+    } catch {}
+    showToast('Thanks — flag sent ✨');
+  }
+  function setupFlag() {
+    $('#flagModal').addEventListener('click', (e) => {
+      if (e.target.id === 'flagModal') closeFlag();
+    });
+    $$('#flagModal [data-flag]').forEach(b => {
+      b.addEventListener('click', () => {
+        const reason = b.dataset.flag;
+        if (reason === 'other') {
+          $('#flagCustomWrap').classList.add('open');
+          $('#flagCustomText').focus();
+          return;
+        }
+        submitFlag(reason, '');
+      });
+    });
+    $('#flagCustomSend').addEventListener('click', () => {
+      const txt = $('#flagCustomText').value.trim();
+      submitFlag('other', txt);
+    });
+  }
 
   // ---------- Boot ----------
   async function applyMovies(payload) {
@@ -536,11 +705,14 @@
     setupVibePanel();
     setupLB();
     setupCommunity();
+    setupFeedback();
+    setupFlag();
+    loadFlags();
     $('#audioBtn').addEventListener('click', () => setAudio(!state.audioOn));
     await loadLikes();
     const prefs = await fetchPrefs();
     state.vibes = prefs.vibes || [];
-    state.cats  = (prefs.categories && prefs.categories.length) ? prefs.categories : ['bollywood'];
+    state.cats  = (prefs.categories && prefs.categories.length) ? prefs.categories : DEFAULT_CATS.slice();
     try {
       const j = await fetchMovies();
       applyMovies(j);

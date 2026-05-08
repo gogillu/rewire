@@ -318,11 +318,12 @@ func (s *Server) handleBuyRzpVerify(w http.ResponseWriter, r *http.Request) {
 		`<div style="font-family:system-ui,sans-serif;max-width:540px;margin:0 auto;padding:24px">
 		   <h2 style="margin:0 0 12px">Welcome to Rewire Premium ✨</h2>
 		   <p>Order: <code>%s</code><br>Razorpay payment: <code>%s</code></p>
-		   <p>Your <b>lifetime token</b> (paste this on <a href="https://rewire.gogillu.live/premium">rewire.gogillu.live/premium</a> if you ever lose access on this device):</p>
+		   <p style="margin-top:18px"><a href="https://rewire.gogillu.live/premium?t=%s" style="display:inline-block;background:linear-gradient(90deg,#ff007a,#ff8a00);color:#fff;padding:12px 22px;border-radius:999px;font-weight:700;text-decoration:none">Tap here to unlock Premium →</a></p>
+		   <p style="margin-top:18px">Or paste this <b>lifetime token</b> on <a href="https://rewire.gogillu.live/premium">rewire.gogillu.live/premium</a>:</p>
 		   <pre style="background:#111;color:#fff;padding:14px;border-radius:8px;overflow:auto;font-size:13px">%s</pre>
 		   <p style="opacity:.7;font-size:12px">Disputes / lost tokens: reply to this email or write to admin@gogillu.live.</p>
 		 </div>`,
-		b.OrderID, b.RzpPaymentID, raw)
+		b.OrderID, b.RzpPaymentID, raw, raw)
 	if _, err := tx.ExecContext(ctx, `
         INSERT INTO email_outbox (kind, order_id, to_addr, subject, html, next_attempt_at, created_at)
         VALUES ('token', ?, ?, ?, ?, ?, ?)
@@ -566,9 +567,11 @@ func (s *Server) handleBuyRzpTestSimulate(w http.ResponseWriter, r *http.Request
 		     This token was issued via a TEST-MODE simulated payment. No money was charged. It will work for unlocking premium until the test database is cleared.
 		   </p>
 		   <p>Order: <code>%s</code></p>
+		   <p style="margin-top:18px"><a href="https://rewire.gogillu.live/premium?t=%s" style="display:inline-block;background:linear-gradient(90deg,#ff007a,#ff8a00);color:#fff;padding:12px 22px;border-radius:999px;font-weight:700;text-decoration:none">Tap here to unlock Premium →</a></p>
+		   <p style="margin-top:18px">Or paste this token manually on <a href="https://rewire.gogillu.live/premium">rewire.gogillu.live/premium</a>:</p>
 		   <pre style="background:#111;color:#fff;padding:14px;border-radius:8px;overflow:auto;font-size:13px">%s</pre>
 		 </div>`,
-		b.OrderID, raw)
+		b.OrderID, raw, raw)
 	if _, err := tx.ExecContext(ctx, `
         INSERT INTO email_outbox (kind, order_id, to_addr, subject, html, next_attempt_at, created_at)
         VALUES ('token', ?, ?, ?, ?, ?, ?)

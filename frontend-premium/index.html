@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#000">
 <title>Rewire Premium · Intense Mode</title>
-<link rel="stylesheet" href="/premium/rewire-intro.css?v=1.5.1">
+<link rel="stylesheet" href="/premium/rewire-intro.css?v=1.6.0">
 <style>
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
@@ -257,19 +257,188 @@ html, body {
   -webkit-text-fill-color: transparent;
 }
 
-/* v1.5 — moved icon clusters out of the title's way: all premium controls
-   now live in two bottom corners, above the brand. Title up top is
-   unobstructed. */
-.bot-left-btns  { position: fixed; left: 14px;  bottom: calc(env(safe-area-inset-bottom, 0px) + 38px); display: flex; gap: 8px; z-index: 11; }
-.bot-right-btns { position: fixed; right: 14px; bottom: calc(env(safe-area-inset-bottom, 0px) + 38px); display: flex; gap: 8px; z-index: 11; }
+/* v1.6.0 — UX restructure:
+   • audio toggle → top-right (matching /direct)
+   • flag-btn → top-right (just left of audio), per card
+   • feedback fb-btn → top-left, shown after 3 cards (just like /direct)
+   • Tone + Top buttons → stacked VERTICALLY on the LEFT, mid-height — out of
+     the way of both the brand chip at the bottom and the bottom community
+     pill (the "+ Write your own ending" plus row). */
+.side-left-btns {
+  position: fixed; left: 14px;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  display: flex; flex-direction: row; gap: 8px;
+  z-index: 11;
+}
 .icon-btn {
-  width: 36px; height: 36px; border-radius: 50%;
-  background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.1);
+  min-width: 36px; height: 36px; padding: 0 12px; border-radius: 18px;
+  background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.16);
   color: #fff; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  font-size: 12px; font-weight: 700; letter-spacing: .3px;
+  white-space: nowrap;
+}
+.icon-btn.icon-only { width: 36px; padding: 0; border-radius: 50%; }
+.icon-btn svg { width: 16px; height: 16px; fill: currentColor; flex: 0 0 auto; }
+
+/* Audio toggle — top-right (parity with /direct). */
+.audio-toggle {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  right: 14px;
+  width: 36px; height: 36px; border-radius: 50%;
+  background: rgba(0,0,0,.45);
+  border: 1px solid rgba(255,255,255,.1);
+  color: #fff; z-index: 11; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
 }
-.icon-btn svg { width: 18px; height: 18px; fill: currentColor; }
+.audio-toggle svg { width: 18px; height: 18px; fill: currentColor; }
+
+/* Feedback button — moved to BOTTOM-LEFT (since top-left is now Tone/Top), shown after 3 cards. */
+.fb-btn {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  left: 14px;
+  width: 32px; height: 32px; border-radius: 50%;
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.08);
+  color: rgba(255,255,255,.7); z-index: 11; cursor: pointer;
+  display: none; align-items: center; justify-content: center;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  opacity: 0; transition: opacity .8s ease;
+}
+.fb-btn.shown { display: flex; opacity: .55; }
+.fb-btn:hover { opacity: 1; }
+.fb-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+/* Per-card flag button — top-right, just left of audio toggle. */
+.flag-btn {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  right: 56px;
+  width: 32px; height: 32px; border-radius: 50%;
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.08);
+  color: rgba(255,255,255,.55); z-index: 12; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  transition: opacity .25s ease, color .25s ease;
+}
+.flag-btn:hover { color: rgba(255,255,255,.9); }
+.flag-btn.flagged { color: #ffb74d; }
+.flag-btn svg { width: 14px; height: 14px; fill: currentColor; }
+
+/* Feedback modal */
+#fbModal {
+  position: fixed; inset: 0; z-index: 200;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.65);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+#fbModal.open { display: flex; }
+#fbModal .panel {
+  width: min(92vw, 360px);
+  background: linear-gradient(180deg, #15151a, #0e0e12);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 22px;
+  padding: 22px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.6);
+  position: relative;
+}
+#fbModal .opts { display: flex; flex-direction: column; gap: 8px; }
+#fbModal .opt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 14px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  font-size: 15px; font-weight: 600;
+  cursor: pointer; color: #fff;
+  transition: background .2s ease, transform .15s ease;
+}
+#fbModal .opt:hover { background: rgba(255,255,255,.08); }
+#fbModal .opt:active { transform: scale(.98); }
+#fbCustomWrap { display: none; margin-top: 12px; }
+#fbCustomWrap.open { display: block; }
+#fbCustomWrap textarea {
+  width: 100%; min-height: 70px; resize: vertical;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px; padding: 10px 12px;
+  color: #fff; font: inherit; font-size: 14px;
+  box-sizing: border-box;
+}
+#fbCustomWrap .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+#fbCustomWrap .send {
+  background: linear-gradient(90deg, #ff007a, #ff8a00);
+  color: #fff; border: 0; padding: 8px 18px;
+  border-radius: 999px; font-weight: 700; cursor: pointer;
+}
+
+/* Flag bottom-sheet */
+#flagModal {
+  position: fixed; inset: 0; z-index: 220;
+  display: none; align-items: flex-end; justify-content: center;
+  background: rgba(0,0,0,.6);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+#flagModal.open { display: flex; }
+#flagModal .sheet {
+  width: 100%; max-width: 480px;
+  background: linear-gradient(180deg, #15151a, #0e0e12);
+  border-top-left-radius: 22px; border-top-right-radius: 22px;
+  border: 1px solid rgba(255,255,255,.08); border-bottom: 0;
+  padding: 22px 22px calc(22px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -20px 60px rgba(0,0,0,.6);
+  animation: sheetIn .25s ease both;
+}
+#flagModal h3 { margin: 0 0 4px; font-size: 17px; }
+#flagModal .desc { font-size: 12px; opacity: .55; margin-bottom: 16px; letter-spacing: .4px; }
+#flagModal .opt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 14px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  font-size: 15px; font-weight: 600;
+  cursor: pointer; color: #fff;
+  margin-bottom: 8px;
+  transition: background .2s ease, transform .15s ease;
+  text-align: left; width: 100%;
+}
+#flagModal .opt:hover { background: rgba(255,255,255,.08); }
+#flagModal .opt:active { transform: scale(.98); }
+#flagCustomWrap { display: none; margin-top: 12px; }
+#flagCustomWrap.open { display: block; }
+#flagCustomWrap textarea {
+  width: 100%; min-height: 60px; resize: vertical;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px; padding: 10px 12px;
+  color: #fff; font: inherit; font-size: 14px;
+  box-sizing: border-box;
+}
+#flagCustomWrap .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+#flagCustomWrap .send {
+  background: linear-gradient(90deg, #ff007a, #ff8a00);
+  color: #fff; border: 0; padding: 8px 18px;
+  border-radius: 999px; font-weight: 700; cursor: pointer;
+}
+.fb-toast {
+  position: fixed; bottom: 80px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20,20,24,.92);
+  border: 1px solid rgba(255,255,255,.1);
+  padding: 10px 22px; border-radius: 999px;
+  font-size: 14px; font-weight: 600; color: #fff;
+  z-index: 250;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  animation: tIn .3s ease both;
+}
+@keyframes tIn { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes sheetIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
 #vibePanel, #lbPanel, #tokenGate {
   position: fixed; inset: 0; z-index: 200;
@@ -348,25 +517,33 @@ html, body {
 }
 #empty { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 50; text-align: center; padding: 24px; opacity: .6; }
 #empty.hidden { display: none; }
-.audio-toggle { width: 36px; height: 36px; }
 </style>
 </head>
 <body>
 
-<!-- v1.5: bottom corners (was top corners — was clipping the title) -->
-<div class="bot-left-btns">
-  <button class="icon-btn" id="vibeBtn" aria-label="Vibes &amp; Categories" title="Intense Mode + categories">
+<!-- v1.6.0: Tone + Top stacked vertically on the LEFT (mid-height, above
+     community pill). Audio toggle returns to top-right. fb-btn at top-left
+     after 3 cards. Per-card flag-btn injected by app.js. -->
+<div class="side-left-btns">
+  <button class="icon-btn" id="vibeBtn" aria-label="Tone &amp; Catalog" title="Pick vibes (humour, emotional, controversial...) + categories (Bollywood, Hollywood, TV)">
     <svg viewBox="0 0 24 24"><path d="M12 2C8 6 6 9 6 13c0 3.3 2.7 6 6 6s6-2.7 6-6c0-4-2-7-6-11z"/></svg>
+    <span class="lbl">Tone</span>
   </button>
-  <button class="icon-btn" id="lbBtn" aria-label="Leaderboard" title="Leaderboard">
+  <button class="icon-btn" id="lbBtn" aria-label="Leaderboard" title="Top alternate endings across all movies">
     <svg viewBox="0 0 24 24"><path d="M7 18h2v-7H7v7zm4 0h2V6h-2v12zm4 0h2v-4h-2v4zM3 21h18v2H3v-2z"/></svg>
+    <span class="lbl">Top</span>
   </button>
 </div>
-<div class="bot-right-btns">
-  <button class="icon-btn audio-toggle" id="audioBtn" aria-label="Toggle sound">
-    <svg viewBox="0 0 24 24" id="audioIcon"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
-  </button>
-</div>
+
+<!-- Audio toggle, top-right (parity with /direct). -->
+<button class="audio-toggle" id="audioBtn" aria-label="Toggle sound">
+  <svg viewBox="0 0 24 24" id="audioIcon"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+</button>
+
+<!-- Feedback button — top-left, fades in after 3 cards (parity with /direct) -->
+<button class="fb-btn" id="fbBtn" aria-label="Share feedback">
+  <svg viewBox="0 0 24 24"><path d="M21 6h-2v9H6v2c0 .55.45 1 1 1h11l4 4V7c0-.55-.45-1-1-1zm-4 6V3c0-.55-.45-1-1-1H3c-.55 0-1 .45-1 1v14l4-4h10c.55 0 1-.45 1-1z"/></svg>
+</button>
 
 <div id="deck"></div>
 <div id="empty"><p>Loading premium endings…</p></div>
@@ -386,7 +563,7 @@ html, body {
       <button class="vibe-pill" data-vibe="impossible">🛸 Impossible</button>
     </div>
     <h4>Catalog</h4>
-    <div class="desc" style="margin-top:-6px;margin-bottom:12px">Mix Bollywood, Hollywood &amp; TV. Empty = Bollywood only.</div>
+    <div class="desc" style="margin-top:-6px;margin-bottom:12px">Mix Bollywood, Hollywood &amp; TV. Empty = all 4 categories.</div>
     <div class="vibe-grid">
       <button class="vibe-pill" data-cat="bollywood">🇮🇳 Bollywood</button>
       <button class="vibe-pill" data-cat="hollywood">🌐 Hollywood</button>
@@ -438,7 +615,50 @@ html, body {
   </div>
 </div>
 
-<script src="/premium/rewire-intro.js?v=1.5.1"></script>
-<script src="/premium/app.js?v=1.5.1"></script>
+<!-- Feedback modal -->
+<div id="fbModal" role="dialog" aria-modal="true" aria-label="Share feedback">
+  <div class="panel">
+    <button class="close-x" data-close="fb">×</button>
+    <h3 style="margin:0 0 4px">How's Rewire?</h3>
+    <div style="font-size:12px;opacity:.55;margin-bottom:14px;letter-spacing:.4px">Tap one — we read every reply.</div>
+    <div class="opts">
+      <button class="opt" data-fb="love">🤩 Loving it — keep going</button>
+      <button class="opt" data-fb="ok">🙂 It's okay</button>
+      <button class="opt" data-fb="boring">😐 Endings feel weak</button>
+      <button class="opt" data-fb="audio">🔇 Audio's wrong / annoying</button>
+      <button class="opt" data-fb="poster">🖼️ Poster missing / wrong</button>
+      <button class="opt" data-fb="other">✍️ Other — let me write</button>
+    </div>
+    <div id="fbCustomWrap">
+      <textarea id="fbCustomText" placeholder="What would make Rewire better?" maxlength="500"></textarea>
+      <div class="row">
+        <button class="send" id="fbCustomSend">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Flag bottom-sheet -->
+<div id="flagModal" role="dialog" aria-modal="true" aria-label="Report this card">
+  <div class="sheet">
+    <button class="close-x" data-close="flag" style="position:absolute;right:14px;top:14px">×</button>
+    <h3>What's wrong here?</h3>
+    <div class="desc">Tap the closest match — we'll review.</div>
+    <button class="opt" data-flag="poster_wrong">🖼️ Wrong poster</button>
+    <button class="opt" data-flag="audio_wrong">🔇 Wrong / bad music</button>
+    <button class="opt" data-flag="ending_offensive">🚫 Ending feels offensive</button>
+    <button class="opt" data-flag="ending_boring">😐 Endings feel weak</button>
+    <button class="opt" data-flag="other">✍️ Other — let me write</button>
+    <div id="flagCustomWrap">
+      <textarea id="flagCustomText" placeholder="Tell us what's wrong…" maxlength="500"></textarea>
+      <div class="row">
+        <button class="send" id="flagCustomSend">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/premium/rewire-intro.js?v=1.6.0"></script>
+<script src="/premium/app.js?v=1.6.0"></script>
 </body>
 </html>

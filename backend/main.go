@@ -159,6 +159,7 @@ func main() {
 	srv.migrateRichGeo()
 	srv.migrateRzpColumns()
 	srv.migrateGlobalColumns() // v1.5.0: region + kind on movies
+	srv.migratePremiumPrefsAllCats() // v1.6.0: existing tokens with bollywood-only -> all 4
 	if secret, err := srv.loadOrCreateSecret(); err != nil {
 		log.Fatalf("rewire: premium secret: %v", err)
 	} else {
@@ -307,7 +308,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // /api/version (JSON) and embedded in /api/movies app_version. We bump this
 // at every shipped release so users / debug tools can see what's actually
 // deployed (per rubber-duck #10).
-const appBuildVersion = "1.5.1"
+const appBuildVersion = "1.6.0"
 
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -364,7 +365,7 @@ func (s *Server) handleMovies(w http.ResponseWriter, r *http.Request) {
 		"movies":      movies,
 		"generated":   time.Now().UTC().Format(time.RFC3339),
 		"count":       len(movies),
-		"app_version": "1.5.1",
+		"app_version": "1.6.0",
 	})
 	s.cacheMu.Lock()
 	s.cacheJSON = body
