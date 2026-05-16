@@ -223,11 +223,10 @@ a { color: #ff8a00; }
     <div class="field">
       <label for="email">Your email <span style="color:#ff8a00">*</span></label>
       <input id="email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required>
-      <div class="note">Mandatory — your token is emailed here from <code>admin@gogillu.live</code>. Also used to recover access if you ever lose it.</div>
-    </div>
-    <div class="field">
-      <label for="email2">Confirm email</label>
-      <input id="email2" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required>
+      <div class="note">
+        <strong style="color:#ffb74d">✉ After payment, your lifetime token + receipt will be emailed to this address</strong>
+        from <code>admin@gogillu.live</code>. Also used to recover access if you ever lose it — double-check it before continuing.
+      </div>
     </div>
     <div class="field">
       <label for="phone">Phone <span style="opacity:.55;font-weight:400">(optional · skips a step in payment)</span></label>
@@ -246,6 +245,18 @@ a { color: #ff8a00; }
     <p style="font-size:14px;line-height:1.45;margin:8px 0 14px;text-align:center">
       One-time <b>₹9</b> · lifetime access<br>
       <span style="font-size:12px;opacity:.55">Order: <span id="orderRef"></span></span>
+    </p>
+
+<!-- v1.7.0: Dodo Payments checkout. PRIMARY in production. Replaces
+     Razorpay (whose merchant activation was denied). On click we POST to
+     /api/buy/dodo-checkout, get a checkout_url, and redirect. After
+     payment Dodo brings the user back to /buy?dodo_order=<localid> and
+     app.js resumes by polling /api/buy/status. -->
+    <button class="btn" id="dodoBtn" style="display:none;font-size:17px;padding:20px;background:linear-gradient(135deg,#3399ff,#0066ff);">
+      ⚡ Pay ₹9 — instant unlock
+    </button>
+    <p class="muted" id="dodoBtnNote" style="display:none;text-align:center;margin-top:6px;font-size:12px;opacity:.7">
+      Secure UPI / card / netbanking · token unlocked + emailed automatically
     </p>
 
     <!-- v1.4.4: Test-mode hint. Razorpay account is in review → UPI gated,
@@ -346,7 +357,7 @@ a { color: #ff8a00; }
     <div class="small-link"><a href="#" id="backFromRecover">← back</a></div>
   </section>
 </div>
-<script src="/buy/app.js?v=1.4.4"></script>
+<script src="/buy/app.js?v=1.7.1"></script>
 </body>
 </html>
 

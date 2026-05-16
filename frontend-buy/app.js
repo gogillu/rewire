@@ -72,11 +72,12 @@
   let pollTimer = null;
 
   // ---------- Step 1 — email ----------
+  // v1.7.1: dropped the "Confirm email" second field. The inline note now
+  // tells the user the token will be emailed here post-payment, so a single
+  // well-validated field is enough.
   $('#goPay').addEventListener('click', async () => {
     const e1 = $('#email').value.trim().toLowerCase();
-    const e2 = $('#email2').value.trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e1)) { alert('Please enter a valid email.'); return; }
-    if (e1 !== e2) { alert("Emails don't match — please retype."); return; }
     track('buy_email_entered');
     $('#goPay').disabled = true;
     $('#goPay').textContent = 'Setting up…';
@@ -135,22 +136,43 @@
   });
 
   // ---------- Step 2 — pay ----------
-  // v1.4.0: Razorpay primary, manual UPI deeplink fallback.
+  // v1.7.0: Dodo Payments primary (Razorpay merchant activation denied).
+  //         Razorpay retained as secondary/legacy. Manual UPI deep-link
+  //         remains as final fallback for self-hosters.
 
-  // Detect whether Razorpay is configured server-side. Hide the manual
-  // fallback panel when it is (Razorpay alone is enough). Show fallback
-  // only on test rigs / self-hosts where REWIRE_RZP_KEY_ID is absent.
+  // Detect whether Dodo / Razorpay are configured server-side and pick the
+  // primary payment path.
+  let DODO_ENABLED = false;
   let RZP_KEY_ID = null;
   let RZP_ENABLED = false;
   fetch('/api/version').then(r => r.ok ? r.json() : null).then(j => {
-    if (j && j.rzp_enabled && j.rzp_key_id) {
-      RZP_ENABLED = true;
-      RZP_KEY_ID = j.rzp_key_id;
-      const fb = $('#fallbackPay');
-      if (fb) fb.style.display = 'none';
+    if (!j) {
+      const fb = $('#fallbackPay'); if (fb) fb.style.display = 'block';
+      return;
+    }
+    DODO_ENABLED = !!j.dodo_enabled;
+    RZP_ENABLED  = !!j.rzp_enabled;
+    RZP_KEY_ID   = j.rzp_key_id || null;
+
+    if (DODO_ENABLED) {
+      // Dodo wins. Show Dodo button, hide Razorpay UI completely, hide
+      // the manual fallback (Dodo handles UPI + card + netbanking).
+      const dodoBtn = $('#dodoBtn'); if (dodoBtn) dodoBtn.style.display = 'block';
+      const dodoNote = $('#dodoBtnNote'); if (dodoNote) dodoNote.style.display = 'block';
+      const rzpBtn = $('#rzpBtn');           if (rzpBtn) rzpBtn.style.display = 'none';
+      const rzpNote = $('#rzpBtnNote');      if (rzpNote) rzpNote.style.display = 'none';
+      const sim  = $('#rzpSimulateBtn');     if (sim)  sim.style.display = 'none';
+      const simNote = $('#rzpSimulateNote'); if (simNote) simNote.style.display = 'none';
+      const hint = $('#testModeHint');       if (hint) hint.style.display = 'none';
+      const fb = $('#fallbackPay');          if (fb) fb.style.display = 'none';
+      return;
+    }
+
+    if (RZP_ENABLED && RZP_KEY_ID) {
+      const fb = $('#fallbackPay'); if (fb) fb.style.display = 'none';
       // v1.4.4: in test mode, demote the (broken) Razorpay button and
       // promote the green simulate button to primary. Reveal the test hint.
-      if (/^rzp_test_/.test(j.rzp_key_id)) {
+      if (/^rzp_test_/.test(RZP_KEY_ID)) {
         const hint = $('#testModeHint');
         if (hint) hint.style.display = 'block';
         const sim  = $('#rzpSimulateBtn');
@@ -160,8 +182,6 @@
         if (sim)  sim.style.display  = 'block';
         if (note) note.style.display = 'block';
         if (blue) {
-          // Shrink + relabel; keep functional in case Razorpay sheet
-          // recovers, but make it visually a fallback.
           blue.style.fontSize = '13.5px';
           blue.style.padding = '12px';
           blue.style.opacity = '0.55';
@@ -182,6 +202,46 @@
     // If /api/version fails, fall back gracefully.
     const fb = $('#fallbackPay');
     if (fb) fb.style.display = 'block';
+  });
+
+  // v1.7.0 — Dodo button. Creates a hosted checkout session and redirects.
+  $('#dodoBtn').addEventListener('click', async () => {
+    if (!order) { alert('Lost order context. Please refresh.'); return; }
+    const btn = $('#dodoBtn');
+    btn.disabled = true;
+    btn.textContent = 'Opening payment…';
+    track('buy_dodo_clicked');
+    try {
+      const r = await fetch('/api/buy/dodo-checkout', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          order_id: order.order_id,
+          contact: (order && order.contact) || '',
+        }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const j = await r.json();
+      if (j.already_paid) {
+        startPolling();
+        show('pending');
+        return;
+      }
+      if (!j.checkout_url) throw new Error('dodo did not return a checkout url');
+      // Persist the session id — it acts as the recovery code we'll
+      // present to /api/buy/dodo-complete after webhook approval.
+      if (j.session_id) {
+        order.dodo_session_id = j.session_id;
+        localStorage.setItem('rw_buy_order', JSON.stringify(order));
+      }
+      localStorage.setItem('rw_buy_pending', '1');
+      // Flush analytics before navigating away.
+      flushEvents(true);
+      window.location.href = j.checkout_url;
+    } catch (err) {
+      alert('Could not start payment: ' + (err.message || err));
+      btn.disabled = false;
+      btn.textContent = '⚡ Pay ₹9 — instant unlock';
+    }
   });
 
   $('#rzpBtn').addEventListener('click', async () => {
@@ -374,10 +434,29 @@
 
   // ---------- Step 4 — Pending → poll ----------
   $('#pollBtn').addEventListener('click', () => poll(true));
-  function startPolling() {
+  // v1.7.0: two-tier polling. Right after returning from Dodo checkout we
+  // poll every 2 s for the first 60 s (covers normal webhook latency),
+  // then back off to 30 s for up to 10 min, then stop. Without this the
+  // 30-s-only loop would leave the user staring at "pending" for half a
+  // minute after a successful pay.
+  let pollStartedAt = 0;
+  function startPolling(fastMode) {
     if (pollTimer) return;
+    pollStartedAt = Date.now();
     poll(false);
-    pollTimer = setInterval(() => poll(false), 30000);
+    schedulePoll(fastMode === true);
+  }
+  function schedulePoll(fast) {
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    const elapsed = Date.now() - pollStartedAt;
+    if (elapsed > 10 * 60 * 1000) {
+      // After 10 min, stop. User can press the manual button.
+      return;
+    }
+    const interval = (fast && elapsed < 60 * 1000) ? 2000 : 30000;
+    pollTimer = setTimeout(() => {
+      poll(false).finally(() => schedulePoll(fast));
+    }, interval);
   }
   async function poll(showAlert) {
     if (!order) return;
@@ -387,10 +466,10 @@
       const j = await r.json();
       track('buy_status_poll', { extra: { status: j.status } });
       if (j.status === 'approved') {
-        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        if (pollTimer) { clearTimeout(pollTimer); clearInterval(pollTimer); pollTimer = null; }
         await completeAndUnlock();
       } else if (j.status === 'rejected') {
-        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        if (pollTimer) { clearTimeout(pollTimer); clearInterval(pollTimer); pollTimer = null; }
         alert('Sadly your order was rejected. Please write to admin@gogillu.live with proof of payment.');
       } else if (showAlert) {
         alert('Still pending — check back soon. We notify by email too.');
@@ -400,6 +479,33 @@
     }
   }
   async function completeAndUnlock() {
+    // v1.7.0: choose completion endpoint based on which provider issued
+    // the order. Dodo orders carry a dodo_session_id (set when /buy/dodo-checkout
+    // returned). Razorpay & manual orders use the legacy UTR-based path.
+    const dodoSession = (order && order.dodo_session_id) || '';
+    if (dodoSession) {
+      try {
+        const r = await fetch('/api/buy/dodo-complete', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_id: order.order_id, session_id: dodoSession }),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const j = await r.json();
+        if (j.token) {
+          localStorage.setItem('rw_premium_token', j.token);
+          $('#tokenBox').textContent = j.token;
+          track('buy_token_unlocked');
+        } else {
+          $('#tokenBox').textContent = '(token already retrieved — check your email)';
+        }
+        localStorage.removeItem('rw_buy_pending');
+        show('done');
+      } catch (err) {
+        alert('Approved! But token fetch failed. Check your email — the token has been mailed.');
+        show('done');
+      }
+      return;
+    }
     const utr = localStorage.getItem('rw_buy_utr') || '';
     try {
       const r = await fetch('/api/buy/complete', {
@@ -430,7 +536,24 @@
   // the pay screen (with the order context restored). If they already
   // unlocked and have a token, /premium handles that and we don't need
   // to do anything special here.
+  // v1.7.0: also handles return-from-Dodo. Dodo's hosted checkout
+  // redirects to /buy?dodo_order=<localid> on completion. We trust the
+  // server-side webhook to flip the status (no signed client payload);
+  // the frontend just polls /api/buy/status until approved.
   (function resume() {
+    let returnFromDodo = false;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const dodoOrderInUrl = params.get('dodo_order');
+      if (dodoOrderInUrl) {
+        returnFromDodo = true;
+        // Strip the query string from the address bar so a reload
+        // doesn't re-trigger this branch.
+        const cleanUrl = window.location.pathname + window.location.hash;
+        try { window.history.replaceState({}, '', cleanUrl); } catch {}
+      }
+    } catch {}
+
     const saved = localStorage.getItem('rw_buy_order');
     if (!saved) return;
     try {
@@ -438,12 +561,25 @@
       if (!o.expires_at || Date.now() > o.expires_at) {
         localStorage.removeItem('rw_buy_order');
         localStorage.removeItem('rw_buy_utr');
+        localStorage.removeItem('rw_buy_pending');
         return;
       }
       order = o;
       $('#orderRef').textContent = o.order_id;
       $('#upiBtn').href = o.deep_link;
       $('#qrImg').src = '/api/buy/qr?order_id=' + encodeURIComponent(o.order_id);
+
+      // If we're returning from Dodo, jump straight to the pending screen
+      // and start fast-polling — the webhook may already have approved the
+      // order by the time we land here, or it'll arrive within seconds.
+      if (returnFromDodo) {
+        $('#pendingOrder').textContent = o.order_id;
+        show('pending');
+        startPolling(true);
+        track('buy_dodo_return');
+        return;
+      }
+
       // Check status — if already approved, skip directly to done.
       fetch('/api/buy/status?order_id=' + encodeURIComponent(o.order_id))
         .then(r => r.ok ? r.json() : null)
@@ -452,6 +588,21 @@
               localStorage.getItem('rw_premium_token')) {
             $('#tokenBox').textContent = localStorage.getItem('rw_premium_token');
             show('done');
+            return;
+          }
+          // If status is already approved but we don't have the token,
+          // try to fetch it. (Edge case: user closed the tab right after
+          // Dodo webhook approval.)
+          if (j && j.status === 'approved') {
+            completeAndUnlock();
+            return;
+          }
+          // Pending: if we have a hint we're mid-flow from Dodo, poll.
+          if (localStorage.getItem('rw_buy_pending') === '1') {
+            $('#pendingOrder').textContent = o.order_id;
+            show('pending');
+            // Was mid-checkout — assume Dodo and poll fast.
+            startPolling(true);
             return;
           }
           show('pay');
