@@ -4,9 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0a0f">
-<title>Rewire Premium — ₹9 lifetime</title>
+<title>Rewire Premium — ₹49 lifetime</title>
 <!--
-  v1.8.1 — Production payment flow.
+  v1.8.2 — Production payment flow at ₹49 (raised from ₹9 to clear the
+  Dodo / Hyperswitch gateway minimum of ~$0.50 USD per transaction).
 
   Payment processor:  Dodo Payments hosted checkout (UPI / cards via Dodo).
   Verification:       Standard-Webhooks-signed payment.succeeded event
@@ -215,12 +216,12 @@ a { color: #ff8aa8; }
       <h2>Order summary</h2>
       <div class="price-row">
         <span class="lbl">Rewire Premium (lifetime)</span>
-        <span class="val">₹9.00</span>
+        <span class="val">₹49.00</span>
       </div>
       <div class="divider"></div>
       <div class="price-row total">
         <span class="lbl">Total today</span>
-        <span class="val">₹9.00</span>
+        <span class="val">₹49.00</span>
       </div>
     </div>
 
@@ -228,7 +229,7 @@ a { color: #ff8aa8; }
       <label for="email-input">Where should we email your access token?</label>
       <input id="email-input" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required>
 
-      <button id="pay-btn" class="btn-primary" type="button">Pay ₹9 →</button>
+      <button id="pay-btn" class="btn-primary" type="button">Pay ₹49 →</button>
 
       <p class="muted" style="margin-top:14px">
         You'll be taken to <strong>Dodo Payments</strong>' secure checkout.
@@ -295,6 +296,6 @@ a { color: #ff8aa8; }
   </p>
 </div>
 
-<script src="/buy/app.js?v=1.8.1"></script>
+<script src="/buy/app.js?v=1.8.2"></script>
 </body>
 </html>

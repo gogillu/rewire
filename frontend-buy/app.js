@@ -1,9 +1,9 @@
-// Rewire /buy — v1.8.1 production payment flow.
+// Rewire /buy — v1.8.2 production payment flow.
 //
 // Two entry paths:
 //
 //   (a) Fresh visit (?dodo_order=… absent in URL):
-//       Show payment selection card. User enters email → click "Pay ₹9".
+//       Show payment selection card. User enters email → click "Pay ₹49".
 //       Frontend: POST /api/buy/init { email, anon_id, session_id }
 //         → { order_id }
 //       Frontend: POST /api/buy/dodo-checkout { order_id }
@@ -29,7 +29,7 @@
 (function () {
   'use strict';
 
-  var REWIRE_VERSION = '1.8.1';
+  var REWIRE_VERSION = '1.8.2';
 
   // ------- DOM helpers -------
   var $ = function (id) { return document.getElementById(id); };
@@ -208,7 +208,7 @@
         });
       }).catch(function (e) {
         btn.disabled = false;
-        btn.textContent = 'Pay ₹9 →';
+        btn.textContent = 'Pay ₹49 →';
         var msg = (e && e.message ? e.message : 'Could not start checkout.').slice(0, 280);
         showErr('select-err', msg);
       });

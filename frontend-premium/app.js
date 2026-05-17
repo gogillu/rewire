@@ -98,7 +98,7 @@
     } catch { return null; }
   }
   // v1.6.0 — premium = full access. Default cats include all 4 (Bollywood,
-  // Hollywood, Indian TV, World/Foreign TV). User pays ₹9 for the whole
+  // Hollywood, Indian TV, World/Foreign TV). User pays ₹49 for the whole
   // catalog, not just Bollywood.
   const DEFAULT_CATS = ['bollywood', 'hollywood', 'tv-in', 'tv-foreign'];
 

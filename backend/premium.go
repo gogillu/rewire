@@ -289,7 +289,7 @@ func (s *Server) handlePremiumMovies(w http.ResponseWriter, r *http.Request) {
 		// v1.6.0 — premium = full access. Default to ALL 4 categories
 		// when prefs row is missing OR categories column is empty. The
 		// v1.5.0 default of [bollywood] was confusing premium users
-		// because they paid ₹9 and got the same catalog as free.
+		// because they paid ₹49 and got the same catalog as free.
 		cats = []string{"bollywood", "hollywood", "tv-in", "tv-foreign"}
 	}
 	movies, err := s.loadMovies(r.Context())

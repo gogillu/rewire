@@ -38,8 +38,8 @@ import (
 )
 
 const (
-	premiumPriceINR    = 9
-	premiumPricePaise  = 900
+	premiumPriceINR    = 49
+	premiumPricePaise  = 4900
 	premiumNote        = "Rewire Premium"
 	orderExpiryHours   = 24
 	adminEmailFallback = "admin@gogillu.live"
@@ -509,7 +509,7 @@ func (s *Server) mintAndEmailToken(ctx context.Context, orderID, email string, r
 //   * Order ID + email + anon_id + IP + UA captured so admin can spot
 //     fraud quickly.
 //
-// At ₹9 with these guardrails, abuse loss is bounded and operational
+// At ₹49 with these guardrails, abuse loss is bounded and operational
 // reasoning stays simple.
 // ---------- /api/buy/claim ----------
 //
@@ -704,7 +704,7 @@ func (s *Server) handleBuyClaimLegacyImpl(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// Notify admin (separately) so they can reconcile.
-	adminSub := "[Rewire] AUTO-CLAIM ₹9 — needs verification: " + b.OrderID
+	adminSub := "[Rewire] AUTO-CLAIM ₹" + fmt.Sprint(premiumPriceINR) + " — needs verification: " + b.OrderID
 	adminHTML := fmt.Sprintf(
 		`<p>Honor-based claim received. Verify against bank statement.</p>
 		 <ul>
@@ -1116,7 +1116,7 @@ func (s *Server) handleBuyFrontend() http.Handler {
 }
 
 // handleBuyQR — v1.3.2 — generate a per-order UPI QR PNG that encodes the
-// EXACT same upi:// deep-link used by the "Pay ₹9 with UPI app" button.
+// EXACT same upi:// deep-link used by the "Pay ₹premium with UPI app" button.
 // This means scanning the QR also lands on the prefilled-amount intent
 // (no manual entry, no PhonePe gallery-QR ₹2,000 limit). Order ID is
 // optional — if absent, a generic VPA-only QR is rendered (less ideal,

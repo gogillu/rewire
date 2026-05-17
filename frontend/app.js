@@ -7,7 +7,7 @@
 // v1.7.0: auto-redirect premium users to /premium on root load.
 // v1.8.0: direct UPI replaces Dodo Payments. Abandonment nudge banner
 //         shown when the user started /buy but never claimed the token.
-window.REWIRE_VERSION = '1.8.1';
+window.REWIRE_VERSION = '1.8.2';
 console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
 
 // v1.7.0 — Premium auto-redirect. Runs BEFORE the IIFE so it can short-
@@ -85,7 +85,7 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
         '<span style="font-size:18px;line-height:1">✨</span>' +
         '<div style="flex:1;min-width:0">' +
           '<div style="font-weight:800;letter-spacing:.2px">You were almost there to enjoy the premium experience</div>' +
-          '<div style="opacity:.92;font-weight:500;margin-top:1px;font-size:12px">Finish your ₹9 UPI payment — lifetime access waiting.</div>' +
+          '<div style="opacity:.92;font-weight:500;margin-top:1px;font-size:12px">Finish your ₹49 UPI payment — lifetime access waiting.</div>' +
         '</div>' +
         '<button type="button" id="rwNudgeGo" style="background:#fff;color:#7b1fa2;border:0;border-radius:999px;padding:8px 14px;font-weight:800;font-size:12.5px;cursor:pointer;letter-spacing:.3px">Continue →</button>' +
         '<button type="button" id="rwNudgeX" aria-label="Dismiss" style="background:transparent;border:0;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:4px 6px;opacity:.85">×</button>';

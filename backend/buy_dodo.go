@@ -148,7 +148,7 @@ func (s *Server) handleBuyDodoCheckout(w http.ResponseWriter, r *http.Request) {
 	// Build the create-checkout-session request. Documented at:
 	// https://docs.dodopayments.com/api-reference/checkout-sessions/create
 	//
-	// We pin the product to the env-configured product_id (₹9 lifetime),
+	// We pin the product to the env-configured product_id (₹49 lifetime),
 	// pre-fill the customer email, force the billing currency to INR,
 	// and embed the local order id + email in metadata so the webhook
 	// can resolve our row without needing a DB lookup by Dodo IDs.
@@ -176,7 +176,7 @@ func (s *Server) handleBuyDodoCheckout(w http.ResponseWriter, r *http.Request) {
 			"allow_phone_number_collection": false,
 		},
 		// Keep checkout minimal — we don't need a full billing address
-		// for a ₹9 digital lifetime token; Dodo will collect just what
+		// for a ₹49 digital lifetime token; Dodo will collect just what
 		// the chosen payment method requires.
 		"minimal_address": true,
 	}
