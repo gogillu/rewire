@@ -1,0 +1,85 @@
+Rewire -- Dodo Payments setup (3 steps, ~3 minutes)
+======================================================
+
+The Dodo dashboard tab is already open in your browser. The Developers ->
+API Keys page should be open too. Please:
+
+STEP 1 -- Generate an API key (~30 seconds)
+-------------------------------------------
+On the open API Keys page, make sure the TOP-RIGHT toggle is in
+LIVE MODE (not Test Mode), then click "Add API Key":
+  Name:  rewire-prod
+  Click Create  ->  COPY the key (it's shown ONLY once).
+
+STEP 2 -- Save the key (~30 seconds)
+------------------------------------
+Open Notepad. Paste the API key. Save As:
+       C:\Users\arushi\Rewire\.dodo-bootstrap-key.txt
+(the file should contain ONLY the key, one line, no quotes)
+
+STEP 3 -- Run one command (~1 minute, automated)
+------------------------------------------------
+Open PowerShell and run:
+
+       powershell.exe -ExecutionPolicy Bypass -File `
+           C:\Users\arushi\Rewire\scripts\dodo-bootstrap.ps1
+
+That one command will:
+     [OK] Create the "Rewire Premium Lifetime" product (Rs.9 INR)
+     [OK] Register the webhook -> https://rewire.gogillu.live/api/buy/dodo-webhook
+     [OK] Pull the webhook signing secret
+     [OK] Write the production env file (dodo-creds.env)
+     [OK] Wipe the one-shot bootstrap key file
+     [OK] Restart the RewireSupervisor task with the new env
+     [OK] Swap in the new rewire.exe (v1.7.0)
+     [OK] Probe /api/version and assert dodo_enabled=true
+
+Expected final output:
+
+       === RESULT ===
+       build version:    1.7.0
+       dodo_enabled:     True
+       dodo_env:         live
+       dodo_product_id:  pdt_xxxxxxxx
+       rzp_enabled:      False  (legacy -- should be false now)
+
+       PRODUCTION DODO PAYMENTS READY.
+
+After that, visit https://rewire.gogillu.live/buy in any browser. Enter
+your email, click the blue "Pay Rs.9 -- instant unlock" button.
+You'll be redirected to Dodo's hosted checkout page. Pay via UPI on
+your phone. When you return to the buy page, it'll auto-flip to
+"Done" within 2-10 seconds with your token.
+
+PREMIUM AUTO-REDIRECT (v1.7.0)
+------------------------------
+After payment, the rewire app remembers you're premium via
+localStorage (key: rw_premium_token). Whenever a premium user opens
+https://rewire.gogillu.live/, they're auto-redirected to /premium.
+Escape hatches if you ever want to see the free landing page:
+       https://rewire.gogillu.live/?stay=1
+   or  localStorage.setItem('rw_stay','1') in DevTools
+
+TROUBLESHOOTING
+---------------
+* "TEST mode key but I wanted live": delete the env file and re-run.
+  To use test key intentionally, create:
+       C:\Users\arushi\Rewire\.dodo-bootstrap-env.txt
+  containing the single word:  test
+  (then re-create the key file and re-run.)
+
+* "Got 401 from Dodo API": API key isn't valid. Re-generate from the
+  dashboard. The bootstrap-key.txt file is wiped after each run.
+
+* "Product/webhook already exists": no action needed -- bootstrap is
+  idempotent. Reuses any existing product named "Rewire Premium
+  Lifetime" and any existing webhook pointing at our URL.
+
+* "supervisor did not relaunch within 90 s": run
+       schtasks /Run /TN RewireSupervisor
+  manually, then probe:
+       curl.exe -sk https://rewire.gogillu.live/api/version
+
+* Razorpay rollback: the rzp-* routes are still in the codebase. To
+  re-enable, delete dodo-creds.env from the runtime dir and restart
+  the supervisor.

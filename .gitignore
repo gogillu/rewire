@@ -18,3 +18,11 @@ data/audio/
 data/premium-secret.bin
 bin/
 *.exe
+
+# Payment provider creds (never commit). Held in the runtime dir; an
+# additional bootstrap file lives at repo root only for the duration of
+# the one-time API key handoff.
+.dodo-bootstrap-key.txt
+*.creds.env
+rzp-creds.env
+dodo-creds.env

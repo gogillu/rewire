@@ -144,6 +144,122 @@
 @keyframes rwiWordIn    { to { opacity: 1; transform: translateY(0); } }
 @keyframes rwiTagIn     { to { opacity: 1; } }
 
+/* ---- v1.6.2 looping mode ---- */
+/* When the overlay has .loop, all animations restart on a 4.2s cycle
+   and the brain outline keeps redrawing. We do NOT auto-dismiss in
+   loop mode; user must tap the glowy "Tap to begin" button. */
+#rewireIntro.loop                                  { cursor: default; }
+#rewireIntro.loop svg.brain                        { animation: rwiBrainIn 1.4s ease-out infinite alternate; }
+#rewireIntro.loop svg.brain .outline               { animation: rwiBrainDrawLoop 4.2s ease-in-out .12s infinite; }
+#rewireIntro.loop svg.brain .synapse.s1            { animation: rwiSparkLoop 4.2s ease-out .9s  infinite; }
+#rewireIntro.loop svg.brain .synapse.s2            { animation: rwiSparkLoop 4.2s ease-out 1.05s infinite; }
+#rewireIntro.loop svg.brain .synapse.s3            { animation: rwiSparkLoop 4.2s ease-out 1.18s infinite; }
+#rewireIntro.loop svg.brain .synapse.s4            { animation: rwiSparkLoop 4.2s ease-out 1.32s infinite; }
+#rewireIntro.loop svg.brain .synapse.s5            { animation: rwiSparkLoop 4.2s ease-out 1.46s infinite; }
+#rewireIntro.loop svg.lines line.l1                { animation: rwiLineLoop 4.2s cubic-bezier(.2,.8,.2,1) .50s infinite; }
+#rewireIntro.loop svg.lines line.l2                { animation: rwiLineLoop 4.2s cubic-bezier(.2,.8,.2,1) .58s infinite; }
+#rewireIntro.loop svg.lines line.l3                { animation: rwiLineLoop 4.2s cubic-bezier(.2,.8,.2,1) .66s infinite; }
+#rewireIntro.loop svg.lines line.l4                { animation: rwiLineLoop 4.2s cubic-bezier(.2,.8,.2,1) .74s infinite; }
+#rewireIntro.loop svg.lines line.l5                { animation: rwiLineLoop 4.2s cubic-bezier(.2,.8,.2,1) .82s infinite; }
+#rewireIntro.loop svg.lines line.l6                { animation: rwiLineLoop 4.2s cubic-bezier(.2,.8,.2,1) .90s infinite; }
+#rewireIntro.loop svg.lines line.l7                { animation: rwiLineLoop 4.2s cubic-bezier(.2,.8,.2,1) .98s infinite; }
+#rewireIntro.loop svg.lines line.l8                { animation: rwiLineLoop 4.2s cubic-bezier(.2,.8,.2,1) 1.06s infinite; }
+#rewireIntro.loop .wordmark                        { animation: rwiWordInLoop 4.2s cubic-bezier(.2,.9,.2,1) 1.45s infinite; }
+#rewireIntro.loop .tagline                         { animation: rwiTagInLoop 4.2s ease-out 1.7s infinite; }
+#rewireIntro.loop .skip-hint                       { display: none; }
+
+@keyframes rwiBrainDrawLoop {
+  0%   { stroke-dashoffset: 1400; }
+  35%  { stroke-dashoffset: 0;    }
+  85%  { stroke-dashoffset: 0;    }
+  100% { stroke-dashoffset: 1400; }
+}
+@keyframes rwiSparkLoop {
+  0%   { opacity: 0; transform: scale(.6); }
+  20%  { opacity: 1; transform: scale(1); }
+  60%  { opacity: .6; }
+  100% { opacity: 0; transform: scale(.6); }
+}
+@keyframes rwiLineLoop {
+  0%   { stroke-dashoffset: 220; opacity: 0; }
+  20%  { stroke-dashoffset: 0;   opacity: 1; }
+  70%  { stroke-dashoffset: 0;   opacity: 1; }
+  100% { stroke-dashoffset: 220; opacity: 0; }
+}
+@keyframes rwiWordInLoop {
+  0%,30%   { opacity: 0; transform: translateY(8px); }
+  45%,90%  { opacity: 1; transform: translateY(0); }
+  100%     { opacity: 0; transform: translateY(8px); }
+}
+@keyframes rwiTagInLoop {
+  0%,38%   { opacity: 0; }
+  50%,90%  { opacity: 1; }
+  100%     { opacity: 0; }
+}
+
+/* The glowy "Tap to begin" CTA. Sits below the wordmark/tagline area.
+   Pulses with a layered shadow so it stays visible while the brain
+   draws and re-draws behind it. */
+#rewireIntro .cta-btn {
+  position: absolute;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14vh);
+  transform: translate(-50%, 0);
+  background: linear-gradient(135deg, #ff007a 0%, #ff8a00 50%, #ffd35e 100%);
+  color: #fff;
+  border: 0;
+  border-radius: 999px;
+  padding: 14px 28px;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: .35em;
+  text-transform: uppercase;
+  cursor: pointer;
+  z-index: 3;
+  font-family: inherit;
+  text-shadow: 0 1px 2px rgba(0,0,0,.4);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,.18) inset,
+    0 8px 30px rgba(255, 0, 122, .55),
+    0 0 60px rgba(255, 138, 0, .35);
+  animation: rwiCtaPulse 2.0s ease-in-out infinite;
+  -webkit-tap-highlight-color: transparent;
+}
+#rewireIntro .cta-btn:active { transform: translate(-50%, 0) scale(.97); }
+#rewireIntro .cta-btn::before {
+  /* Outer halo ring. */
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 999px;
+  background: radial-gradient(closest-side, rgba(255, 0, 122, .35), rgba(255, 0, 122, 0) 70%);
+  z-index: -1;
+  animation: rwiCtaHalo 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes rwiCtaPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,.18) inset,
+      0 8px 30px rgba(255, 0, 122, .55),
+      0 0 60px rgba(255, 138, 0, .35);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,.30) inset,
+      0 12px 44px rgba(255, 0, 122, .80),
+      0 0 96px rgba(255, 138, 0, .60);
+  }
+}
+@keyframes rwiCtaHalo {
+  0%, 100% { opacity: .55; transform: scale(1); }
+  50%      { opacity: .95; transform: scale(1.10); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  #rewireIntro { display: none; }
+  #rewireIntro:not(.loop) { display: none; }
+  /* In loop mode (used as splash) we still need to be visible — but
+     suppress the heaviest animations. */
+  #rewireIntro.loop * { animation-duration: 0s !important; }
+  #rewireIntro.loop .cta-btn { animation: none; }
 }

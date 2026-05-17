@@ -1,4 +1,4 @@
-# rewire-supervise.ps1 — keep Rewire's HTTPS server alive.
+# rewire-supervise.ps1 ? keep Rewire's HTTPS server alive.
 #
 # Runs on a 30-second loop:
 #   * If the rewire.exe process is dead, relaunch it.
@@ -39,6 +39,36 @@ function Test-RewireAlive {
 
 function Start-Rewire {
     if (Test-Path $adminFile) { $env:REWIRE_ADMIN = (Get-Content $adminFile -Raw).Trim() }
+    # Payment provider creds. MUTUALLY EXCLUSIVE: if dodo-creds.env is
+    # present, we prefer it and refuse to load rzp-creds.env. Reason: the
+    # legacy rzp-creds.env holds test-mode keys, and the
+    # /api/buy/rzp-test-simulate endpoint will happily mint free tokens
+    # whenever rzpEnabled() is true with a test key. Loading both means
+    # an attacker could bypass Dodo payment by hitting the rzp simulate
+    # endpoint.
+    $credsToLoad = @()
+    $dodoFile = Join-Path $RuntimeDir 'dodo-creds.env'
+    $rzpFile  = Join-Path $RuntimeDir 'rzp-creds.env'
+    if (Test-Path $dodoFile) {
+        $credsToLoad += $dodoFile
+        if (Test-Path $rzpFile) {
+            Log "skipped rzp-creds.env (dodo-creds.env takes precedence)"
+        }
+    } elseif (Test-Path $rzpFile) {
+        $credsToLoad += $rzpFile
+    }
+    foreach ($credFile in $credsToLoad) {
+        Get-Content $credFile | ForEach-Object {
+            $line = $_.Trim()
+            if (-not $line -or $line.StartsWith('#')) { return }
+            $eq = $line.IndexOf('=')
+            if ($eq -lt 1) { return }
+            $k = $line.Substring(0, $eq).Trim()
+            $v = $line.Substring($eq + 1).Trim()
+            if ($k) { Set-Item -Path "env:$k" -Value $v }
+        }
+        Log "loaded creds from $(Split-Path -Leaf $credFile)"
+    }
     $args = @('-port', $Port, '-frontend', $FrontendDir, '-datadir', $DataDir, '-certdir', $CertDir)
     $p = Start-Process -FilePath $RewireExe -ArgumentList $args `
         -WorkingDirectory $WorkingDir `
@@ -54,7 +84,7 @@ Log "supervisor boot"
 while ($true) {
     try {
         if (-not (Test-RewireAlive)) {
-            Log "rewire not alive — restarting"
+            Log "rewire not alive -- restarting"
             if (Test-Path $pidFile) {
                 $oldPid = (Get-Content $pidFile -Raw).Trim()
                 if ($oldPid -match '^\d+$') {

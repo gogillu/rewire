@@ -466,6 +466,7 @@ function modePill(m){
   const cls = {abhinav:'abhinav',sagar:'sagar',premium:'premium',buy:'buy','v1.0.0':'v100'}[m]||'';
   return '<span class="mode-pill '+cls+'">'+htmlescape(m)+'</span>';
 }
+function tbl(el, headers, rows){
   el.innerHTML = '<thead><tr>'+headers.map(h=>'<th>'+htmlescape(h)+'</th>').join('')+'</tr></thead><tbody>'+
     rows.map(r=>'<tr>'+r.map((c,i)=>'<td'+(typeof c==='number'?' class="num"':'')+'>'+(c==null?'—':c)+'</td>').join('')+'</tr>').join('')+
     '</tbody>';

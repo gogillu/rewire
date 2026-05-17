@@ -393,13 +393,34 @@ func (s *Server) handlePremiumLeaderboard(w http.ResponseWriter, r *http.Request
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	// v1.6.1 — Rank across BOTH `vibe_endings` (premium) and the classic
+	// `endings` (free) table. Earlier the query only saw vibe_endings,
+	// so a movie with one stray vibe-like would outrank movies whose
+	// classic endings had hundreds of likes (because those classic
+	// likes were invisible to the leaderboard). UNION ALL gives every
+	// ending — free or premium — a fair shot, and the per-movie dedup
+	// below still picks the single highest-liked entry per bucket.
 	rows, err := s.db.QueryContext(r.Context(), `
-        SELECT v.id, v.movie_id, v.vibe, v.text, v.likes,
-               m.title, m.year, m.poster_url,
-               COALESCE(m.region,'bollywood'), COALESCE(m.kind,'movie')
-        FROM vibe_endings v
-        JOIN movies m ON m.id = v.movie_id
-        ORDER BY v.likes DESC, v.id ASC
+        SELECT id, movie_id, vibe, text, likes,
+               title, year, poster_url, region, kind
+        FROM (
+            SELECT v.id AS id, v.movie_id AS movie_id,
+                   v.vibe AS vibe, v.text AS text, v.likes AS likes,
+                   m.title AS title, m.year AS year, m.poster_url AS poster_url,
+                   COALESCE(m.region,'bollywood') AS region,
+                   COALESCE(m.kind,'movie')      AS kind
+            FROM vibe_endings v
+            JOIN movies m ON m.id = v.movie_id
+            UNION ALL
+            SELECT e.id AS id, e.movie_id AS movie_id,
+                   '' AS vibe, e.text AS text, e.likes AS likes,
+                   m.title AS title, m.year AS year, m.poster_url AS poster_url,
+                   COALESCE(m.region,'bollywood') AS region,
+                   COALESCE(m.kind,'movie')      AS kind
+            FROM endings e
+            JOIN movies m ON m.id = e.movie_id
+        )
+        ORDER BY likes DESC, id ASC
     `)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

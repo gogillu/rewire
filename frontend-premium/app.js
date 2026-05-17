@@ -360,28 +360,24 @@
 
   // ---------- Community endings sheet ----------
   // The /api/community/* endpoints are NOT premium-gated on the backend, so
-  // we can reuse them as-is.
-  async function openCommunitySheet(m) {
+  // we can reuse them as-is. v1.6.2 — read the list from m.community (which
+  // /api/premium/movies already returns) instead of a non-existent GET
+  // endpoint that always 404'd and showed "No entries yet" permanently.
+  function openCommunitySheet(m) {
     state.activeMovieId = m.id;
     state.activeMovie = m;
     track('community_open', { movie_id: m.id });
     $('#communityTitle').textContent = 'Community endings · ' + m.title;
-    $('#communityList').innerHTML = '<div style="opacity:.5;font-size:13px;padding:8px 0">Loading…</div>';
     $('#communitySheet').classList.add('open');
     $('#communityText').value = '';
-    try {
-      const r = await fetch('/api/community/endings?movie_id=' + encodeURIComponent(m.id));
-      if (!r.ok) { $('#communityList').innerHTML = '<div style="opacity:.5;font-size:13px;padding:8px 0">No entries yet — be the first.</div>'; return; }
-      const j = await r.json();
-      const items = j.items || [];
-      if (items.length === 0) {
-        $('#communityList').innerHTML = '<div style="opacity:.5;font-size:13px;padding:8px 0">No entries yet — be the first.</div>';
-      } else {
-        $('#communityList').innerHTML = items.map(buildCommunityItem).join('');
-        bindCommunityItemHandlers();
-      }
-    } catch (e) {
-      $('#communityList').innerHTML = '<div style="opacity:.5;font-size:13px;padding:8px 0">Couldn\'t load: ' + escapeHTML(e.message) + '</div>';
+    const items = (m.community || []).slice().sort((a, b) =>
+      (b.likes || 0) - (a.likes || 0) || (b.rating_n || 0) - (a.rating_n || 0)
+    );
+    if (items.length === 0) {
+      $('#communityList').innerHTML = '<div style="opacity:.5;font-size:13px;padding:8px 0">No entries yet — be the first.</div>';
+    } else {
+      $('#communityList').innerHTML = items.map(buildCommunityItem).join('');
+      bindCommunityItemHandlers();
     }
   }
   function buildCommunityItem(it) {
@@ -438,7 +434,7 @@
       const r = await fetch('/api/community/rate-ending', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ending_id: id, rating }),
+        body: JSON.stringify({ ending_id: id, rating, anon_id: ANON_ID }),
       });
       if (!r.ok) return;
       try { localStorage.setItem(communityRateKey(id), String(rating)); } catch {}
@@ -449,21 +445,33 @@
     } catch {}
   }
   async function communitySubmit() {
+    const m = state.activeMovie;
     const txt = ($('#communityText').value || '').trim();
-    if (!txt || !state.activeMovieId) return;
+    if (!txt || !m) return;
     const author = ($('#communityAuthor').value || '').trim().slice(0, 32);
     try {
       $('#communitySubmit').disabled = true;
+      // v1.6.2 — backend expects `content_id`, not `movie_id`. Also pass
+      // anon_id so the 3-per-title rate-limit can identify the submitter.
       const r = await fetch('/api/community/submit-ending', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ movie_id: state.activeMovieId, text: txt.slice(0, 200), author }),
+        body: JSON.stringify({ content_id: m.id, text: txt.slice(0, 200), author, anon_id: ANON_ID }),
       });
       if (!r.ok) { alert('Could not submit (' + r.status + ').'); return; }
-      track('community_submit', { movie_id: state.activeMovieId });
+      const j = await r.json().catch(() => ({}));
+      track('community_submit', { movie_id: m.id });
       $('#communityText').value = '';
-      // Refresh list with new entry on top.
-      openCommunitySheet(state.activeMovie);
+      // Optimistically prepend the new entry into m.community so the sheet
+      // re-render picks it up without needing a fresh /api/premium/movies fetch.
+      m.community = m.community || [];
+      m.community.unshift({
+        id: j.ending_id,
+        author: j.author || author || 'anonymous',
+        text: j.text || txt.slice(0, 200),
+        likes: 0, avg_rating: 0, rating_n: 0,
+      });
+      openCommunitySheet(m);
     } catch (e) {
       alert('Submit failed: ' + e.message);
     } finally {

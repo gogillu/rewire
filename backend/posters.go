@@ -40,7 +40,32 @@ func (s *Server) backfillPosters(ctx context.Context) {
 	// v1.5.1 — clear stale "none" sentinels so the new region/kind-aware
 	// resolver gets another shot at the 50+ Hollywood/TV stragglers that
 	// the v1.5.0 Bollywood-only variant list could not find.
+	_, _ = s.db.ExecContext(ctx, `UPDATE movies SET poster_url = 'none' WHERE poster_url IS NULL`)
 	_, _ = s.db.ExecContext(ctx, `UPDATE movies SET poster_url = '' WHERE poster_url = 'none'`)
+
+	// v1.6.2 — force-apply hardcoded overrides over any existing DB value.
+	// The May-2026 audit found 82 of 97 user-visible Bollywood posters
+	// were broken upstream. Treat the override map as authoritative so a
+	// new override always wins on next boot, no manual SQL needed.
+	if len(posterOverrides) > 0 {
+		applied := 0
+		for id, hard := range posterOverrides {
+			if hard == "" {
+				continue
+			}
+			res, err := s.db.ExecContext(ctx,
+				`UPDATE movies SET poster_url = ? WHERE id = ? AND poster_url != ?`,
+				hard, id, hard)
+			if err == nil {
+				if n, _ := res.RowsAffected(); n > 0 {
+					applied++
+				}
+			}
+		}
+		if applied > 0 {
+			log.Printf("rewire: poster overrides applied to %d movie(s)", applied)
+		}
+	}
 
 	rows, err := s.db.QueryContext(ctx, `
         SELECT id, title, year, COALESCE(region,'bollywood'), COALESCE(kind,'movie')

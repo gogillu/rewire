@@ -110,5 +110,38 @@
     });
   }
 
-  window.RewireIntro = { show: show };
+  // v1.6.2 — looping splash variant. Animation runs continuously until
+  // the user taps the glowy "Tap to begin" button. Resolves when the
+  // overlay is dismissed. The CTA label can be overridden via
+  // opts.ctaLabel (default: "Tap to begin").
+  function loop(opts) {
+    opts = opts || {};
+    return new Promise((resolve) => {
+      const el = buildOverlay();
+      el.classList.add('loop');
+      // Add the glowy CTA button on top of the looping animation.
+      const cta = document.createElement('button');
+      cta.className = 'cta-btn';
+      cta.type = 'button';
+      cta.textContent = opts.ctaLabel || 'Tap to begin';
+      cta.setAttribute('aria-label', cta.textContent);
+      el.querySelector('.stage').appendChild(cta);
+      document.body.appendChild(el);
+
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        markSeen();
+        el.classList.add('fading');
+        setTimeout(() => { try { el.remove(); } catch (_) {} resolve(true); }, 380);
+      };
+      cta.addEventListener('click', (e) => { e.stopPropagation(); finish(); });
+      // ESC for desktop accessibility.
+      const escHandler = (e) => { if (e.key === 'Escape') finish(); };
+      window.addEventListener('keydown', escHandler, { once: true });
+    });
+  }
+
+  window.RewireIntro = { show: show, loop: loop };
 })();

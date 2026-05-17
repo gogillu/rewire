@@ -158,6 +158,7 @@ func main() {
 	srv.migrateAddModeColumn()
 	srv.migrateRichGeo()
 	srv.migrateRzpColumns()
+	srv.migrateDodoColumns()
 	srv.migrateGlobalColumns() // v1.5.0: region + kind on movies
 	srv.migratePremiumPrefsAllCats() // v1.6.0: existing tokens with bollywood-only -> all 4
 	if secret, err := srv.loadOrCreateSecret(); err != nil {
@@ -189,6 +190,13 @@ func main() {
 	mux.HandleFunc("POST /api/feedback", srv.handleFeedback)
 	mux.HandleFunc("GET /api/stats", srv.handleStats)
 	mux.HandleFunc("GET /dashboard", srv.handleDashboard)
+
+	// ---- DB browser (admin) ----
+	mux.HandleFunc("GET /dbview", srv.handleDBViewPage)
+	mux.HandleFunc("GET /api/dbview/tables", srv.handleDBViewTables)
+	mux.HandleFunc("GET /api/dbview/schema", srv.handleDBViewSchema)
+	mux.HandleFunc("GET /api/dbview/rows", srv.handleDBViewRows)
+	mux.HandleFunc("POST /api/dbview/query", srv.handleDBViewQuery)
 	mux.HandleFunc("POST /api/admin/upsert-ending", srv.handleUpsertEnding)
 	mux.HandleFunc("GET /api/abhinav/movies", srv.handleAbhinavMovies)
 	mux.HandleFunc("POST /api/abhinav/like", srv.handleAbhinavLike)
@@ -238,6 +246,9 @@ func main() {
 	mux.HandleFunc("POST /api/buy/rzp-verify", srv.handleBuyRzpVerify)   // v1.4.0
 	mux.HandleFunc("POST /api/buy/rzp-webhook", srv.handleBuyRzpWebhook) // v1.4.0
 	mux.HandleFunc("POST /api/buy/rzp-test-simulate", srv.handleBuyRzpTestSimulate) // v1.4.3: test-mode only
+	mux.HandleFunc("POST /api/buy/dodo-checkout", srv.handleBuyDodoCheckout)         // v1.7.0: dodo payments
+	mux.HandleFunc("POST /api/buy/dodo-complete", srv.handleBuyDodoComplete)         // v1.7.0
+	mux.HandleFunc("POST /api/buy/dodo-webhook", srv.handleBuyDodoWebhook)           // v1.7.0
 	mux.Handle("GET /buy", srv.handleBuyFrontend())
 	mux.Handle("GET /buy/", srv.handleBuyFrontend())
 
@@ -308,15 +319,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // /api/version (JSON) and embedded in /api/movies app_version. We bump this
 // at every shipped release so users / debug tools can see what's actually
 // deployed (per rubber-duck #10).
-const appBuildVersion = "1.6.1"
+const appBuildVersion = "1.8.1"
 
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":     appBuildVersion,
-		"time":        time.Now().UTC().Format(time.RFC3339),
-		"rzp_enabled": rzpEnabled(),
-		"rzp_key_id":  rzpKeyID(), // public key only, never the secret
+		"version":          appBuildVersion,
+		"time":             time.Now().UTC().Format(time.RFC3339),
+		"rzp_enabled":      rzpEnabled(),
+		"rzp_key_id":       rzpKeyID(), // public key only, never the secret
+		"dodo_enabled":     dodoEnabled(),
+		"dodo_env":         dodoEnv(),
+		"dodo_product_id":  dodoProductID(),
 	})
 }
 
@@ -346,12 +360,21 @@ func (s *Server) handleMovies(w http.ResponseWriter, r *http.Request) {
 	// /1.0.0 frontends. None of those have audio or classic endings for
 	// Hollywood/TV titles, so the global catalog stays Bollywood-movie-
 	// only here. Premium gets the unfiltered catalog via /api/premium/*.
+	//
+	// v1.6.2 — also drop titles that don't yet have all 3 AI endings.
+	// Otherwise the UI shows "Rewriting reality…" placeholder cards and
+	// users (correctly) think the app is broken. Premium still sees the
+	// full catalog via /api/premium/movies.
 	bolly := movies[:0]
 	for _, m := range movies {
 		region, kind := regionKindAllowed(m.Region, m.Kind)
-		if region == "bollywood" && kind == "movie" {
-			bolly = append(bolly, m)
+		if region != "bollywood" || kind != "movie" {
+			continue
 		}
+		if len(m.Endings) < 3 {
+			continue
+		}
+		bolly = append(bolly, m)
 	}
 	movies = bolly
 

@@ -1,29 +1,116 @@
-// poster_overrides.go — v1.5.1: hardcoded poster URLs for titles that
-// Wikipedia REST keeps misrouting (apostrophes, ASCII em-dashes,
-// disambig-page winners, etc.). Checked BEFORE Wikipedia is queried,
-// so these are authoritative.
+// poster_overrides.go — v1.6.2: hardcoded poster URLs for titles that
+// the Wikipedia REST resolver cannot reach. Authoritative — see
+// posters.go:backfillPosters which now force-writes every override at
+// boot, so a corrected URL here always wins on next restart.
 //
-// All URLs are direct upload.wikimedia.org thumbnails copied from the
-// matching Wikipedia article infobox. Stable, no API call, no
-// rate-limit risk.
+// All URLs verified May 10, 2026 via HEAD (audit-posters.ps1 +
+// harvest-posters.ps1). Anything blank or commented "MANUAL REVIEW"
+// could not be auto-resolved and needs a human curator.
 package main
 
 var posterOverrides = map[string]string{
-	// ---------- Bollywood movies (14) ----------
-	"andaz-apna-apna":   "https://upload.wikimedia.org/wikipedia/en/c/c9/Andaz_Apna_Apna_-_Poster.jpg",
-	"bajrangi-bhaijaan": "https://upload.wikimedia.org/wikipedia/en/2/26/Bajrangi_Bhaijaan_Poster.jpg",
-	"dear-zindagi":      "https://upload.wikimedia.org/wikipedia/en/4/40/Dear_Zindagi_poster.jpg",
-	"gow-2":             "https://upload.wikimedia.org/wikipedia/en/4/4e/Gangs_of_Wasseypur_-_Part_2.jpg",
-	"jersey-2022":       "https://upload.wikimedia.org/wikipedia/en/d/db/Jersey_%282022_film%29_poster.jpg",
-	"kabhi-khushi":      "https://upload.wikimedia.org/wikipedia/en/2/29/Kabhi_Khushi_Kabhie_Gham_Poster.jpg",
-	"khosla-ka-ghosla":  "https://upload.wikimedia.org/wikipedia/en/8/8b/Khosla_Ka_Ghosla.jpg",
-	"krish-3":           "https://upload.wikimedia.org/wikipedia/en/8/89/Krrish_3_poster.jpg",
-	"masaan":            "https://upload.wikimedia.org/wikipedia/en/4/4e/Masaan_film_poster.jpg",
-	"mulk":              "https://upload.wikimedia.org/wikipedia/en/8/86/Mulk_poster.jpg",
-	"my-name-is-khan":   "https://upload.wikimedia.org/wikipedia/en/9/96/My_Name_Is_Khan_poster.jpg",
-	"omkara":            "https://upload.wikimedia.org/wikipedia/en/8/86/Omkara2006film.jpg",
-	"padmaavat":         "https://upload.wikimedia.org/wikipedia/en/f/fb/Padmaavat_poster.jpg",
-	"thappad":           "https://upload.wikimedia.org/wikipedia/en/d/db/Thappad_poster.jpg",
+	// ---------- Bollywood movies (76) ----------
+	// May-2026 audit: 82 of 97 user-visible Bollywood posters were
+	// 404'd upstream because Wikipedia silently re-uploaded the files.
+	// All entries below are the fresh, verified URLs.
+	"3-idiots":                "https://upload.wikimedia.org/wikipedia/en/d/df/3_idiots_poster.jpg",
+	"83":                      "https://upload.wikimedia.org/wikipedia/en/6/69/83_film_poster.jpg",
+	"a-wednesday":             "https://upload.wikimedia.org/wikipedia/en/7/77/A_Wednesday_Poster.JPG",
+	"andaz-apna-apna":         "https://upload.wikimedia.org/wikipedia/en/1/15/Andaz_Apna_Apna.jpg",
+	"andhadhun":               "https://upload.wikimedia.org/wikipedia/en/4/47/Andhadhun_poster.jpg",
+	// NOTE: id `andhera` carries the seed for "Pad Man" — likely a
+	// data-seeding mix-up. Pin Pad Man's poster so visuals match the
+	// title shown. Flag for the next data audit.
+	"andhera":           "https://upload.wikimedia.org/wikipedia/en/c/c2/Padman_poster.jpg",
+	"animal":            "https://upload.wikimedia.org/wikipedia/en/9/90/Animal_%282023_film%29_poster.jpg",
+	"article-15":        "https://upload.wikimedia.org/wikipedia/en/1/11/Article_15_Poster.jpg",
+	"bajirao-mastani":   "https://upload.wikimedia.org/wikipedia/en/c/c0/Bajirao_Mastani_poster.jpg",
+	"bajrangi-bhaijaan": "https://upload.wikimedia.org/wikipedia/en/d/dd/Bajrangi_Bhaijaan_Poster.jpg",
+	"bareilly-ki-barfi": "https://upload.wikimedia.org/wikipedia/en/9/97/Bareilly_Ki_Barfi_Poster.jpg",
+	"barfi":             "https://upload.wikimedia.org/wikipedia/en/2/2e/Barfi%21_poster.jpg",
+	"bhaag-milkha-bhaag": "https://upload.wikimedia.org/wikipedia/en/4/42/Bhaag_Milkha_Bhaag_poster.jpg",
+	"black":             "https://upload.wikimedia.org/wikipedia/en/3/3c/Black_Film.jpg",
+	"black-friday":      "https://upload.wikimedia.org/wikipedia/en/5/58/Black_Friday_%282007%29.jpg",
+	"chak-de-india":     "https://upload.wikimedia.org/wikipedia/en/0/0c/Chak_De%21_India.jpg",
+	"dabangg":           "https://upload.wikimedia.org/wikipedia/en/7/73/Dabangg_poster.jpg",
+	"dangal":            "https://upload.wikimedia.org/wikipedia/en/9/99/Dangal_Poster.jpg",
+	"ddlj":              "https://upload.wikimedia.org/wikipedia/en/8/80/Dilwale_Dulhania_Le_Jayenge_poster.jpg",
+	"dear-zindagi":      "https://upload.wikimedia.org/wikipedia/en/9/9e/Dear_Zindagi_poster.jpg",
+	"devdas-2002":       "https://upload.wikimedia.org/wikipedia/en/9/9a/Devdas_%282002_Hindi_film%29.jpg",
+	"dil-chahta-hai":    "https://upload.wikimedia.org/wikipedia/en/d/db/Dil_Chahta_Hai.jpg",
+	"don-2":             "https://upload.wikimedia.org/wikipedia/en/d/d2/Don_2_poster.jpg",
+	"don-2006":          "https://upload.wikimedia.org/wikipedia/en/1/14/Don_%282006_Hindi_film%29_poster.jpg",
+	"drishyam":          "https://upload.wikimedia.org/wikipedia/en/8/8a/Drishyam_2015_film.jpg",
+	"drishyam-2":        "https://upload.wikimedia.org/wikipedia/en/9/9e/Drishyam_2_2022_film_poster.jpg",
+	"dum-laga-ke-haisha": "https://upload.wikimedia.org/wikipedia/en/7/76/Dum_Laga_Ke_Haisha_%282015_film%29.jpeg",
+	"gangs-of-wasseypur": "https://upload.wikimedia.org/wikipedia/en/6/6a/Gangs_of_Wasseypur_poster.jpg",
+	"gow-2":              "https://upload.wikimedia.org/wikipedia/en/5/58/Gangs_of_wasseypur_II.jpg",
+	"gully-boy":          "https://upload.wikimedia.org/wikipedia/en/0/07/Gully_Boy_poster.jpg",
+	"haider":             "https://upload.wikimedia.org/wikipedia/en/f/f1/Haider_Poster.jpg",
+	"hera-pheri":         "https://upload.wikimedia.org/wikipedia/en/a/a5/Hera_Pheri_2000_poster.jpg",
+	"highway":            "https://upload.wikimedia.org/wikipedia/en/7/72/Highway_Hindi_Film_Poster.jpg",
+	"iqbal":              "https://upload.wikimedia.org/wikipedia/en/a/ad/Iqbal_poster.jpg",
+	"jab-we-met":         "https://upload.wikimedia.org/wikipedia/en/9/9f/Jab_We_Met_Poster.jpg",
+	"jawan":              "https://upload.wikimedia.org/wikipedia/en/3/39/Jawan_film_poster.jpg",
+	"jersey-2022":        "https://upload.wikimedia.org/wikipedia/en/2/2a/Jersey_2022_poster.jpg",
+	"kabhi-khushi":       "https://upload.wikimedia.org/wikipedia/en/4/4d/Kabhi_Khushi_Kabhie_Gham..._poster.jpg",
+	"kahaani":            "https://upload.wikimedia.org/wikipedia/en/f/f2/Kahaani_poster.jpg",
+	"kal-ho-naa-ho":      "https://upload.wikimedia.org/wikipedia/en/a/aa/Kal_Ho_Naa_Ho_poster.jpg",
+	"kantara":            "https://upload.wikimedia.org/wikipedia/en/8/84/Kantara_poster.jpeg",
+	"kapoor-and-sons":    "https://upload.wikimedia.org/wikipedia/en/5/59/Kapoor_%26_Sons_poster.jpg",
+	"karthik-calling-karthik": "https://upload.wikimedia.org/wikipedia/en/d/db/Karthik_Calling_Karthik.jpg",
+	"kesari":            "https://upload.wikimedia.org/wikipedia/en/c/c4/Kesari_poster.jpg",
+	"khosla-ka-ghosla":  "https://upload.wikimedia.org/wikipedia/en/5/59/Khosla_Ka_Ghosla.jpg",
+	"krish-3":           "https://upload.wikimedia.org/wikipedia/en/2/28/Krrish_3_%282013_film%29_poster.jpg",
+	"krrish":            "https://upload.wikimedia.org/wikipedia/en/9/95/Krrish_poster.jpg",
+	"laapataa-ladies":   "https://upload.wikimedia.org/wikipedia/en/5/52/Laapataa_Ladies_poster.jpg",
+	"lagaan":            "https://upload.wikimedia.org/wikipedia/en/b/b6/Lagaan.jpg",
+	"lage-raho-munna-bhai": "https://upload.wikimedia.org/wikipedia/en/3/35/Lage_raho_munna_bhai.JPG",
+	"manjhi":            "https://upload.wikimedia.org/wikipedia/en/4/4f/Manjhi_The_Mountain_Man_-_Poster.jpg",
+	"maqbool":           "https://upload.wikimedia.org/wikipedia/en/7/76/Maqbool_poster.jpg",
+	"mardaani":          "https://upload.wikimedia.org/wikipedia/en/0/02/Official_Poster_of_Mardaani.jpg",
+	"masaan":            "https://upload.wikimedia.org/wikipedia/en/1/1c/Masaan_poster.jpg",
+	"ms-dhoni":          "https://upload.wikimedia.org/wikipedia/en/3/33/M.S._Dhoni_-_The_Untold_Story_poster.jpg",
+	"mulk":              "https://upload.wikimedia.org/wikipedia/en/2/2a/Mulk_-_2018_Movie_Poster.jpg",
+	"munjya":            "https://upload.wikimedia.org/wikipedia/en/3/39/Munjya_2024.jpg",
+	"munna-bhai-mbbs":   "https://upload.wikimedia.org/wikipedia/en/8/84/Munna_Bhai_M.B.B.S._poster.jpg",
+	"my-name-is-khan":   "https://upload.wikimedia.org/wikipedia/en/5/5d/My_Name_Is_Khan_film_poster.jpg",
+	"newton":            "https://upload.wikimedia.org/wikipedia/en/6/68/Newton_%28film%29.png",
+	"omkara":            "https://upload.wikimedia.org/wikipedia/en/9/9d/Omkarapromoposter.jpg",
+	"oye-lucky":         "https://upload.wikimedia.org/wikipedia/en/d/d0/Oyelucky.jpg",
+	"padmaavat":         "https://upload.wikimedia.org/wikipedia/en/7/73/Padmaavat_poster.jpg",
+	"phir-hera-pheri":   "https://upload.wikimedia.org/wikipedia/en/3/3a/Still-phir-hera-phir.jpg",
+	"piku":              "https://upload.wikimedia.org/wikipedia/en/9/98/Piku.jpg",
+	"pink":              "https://upload.wikimedia.org/wikipedia/en/a/ae/Pinkmovieposter.jpg",
+	"pk":                "https://upload.wikimedia.org/wikipedia/en/c/c3/PK_poster.jpg",
+	"queen":             "https://upload.wikimedia.org/wikipedia/en/4/45/QueenMoviePoster7thMarch.jpg",
+	"ra-one":            "https://upload.wikimedia.org/wikipedia/en/5/58/Ra.Oneposter.jpg",
+	"raanjhanaa":        "https://upload.wikimedia.org/wikipedia/en/a/ae/Raanjhanaafilmposter.jpg",
+	"raazi":             "https://upload.wikimedia.org/wikipedia/en/2/2f/Raazi_-_Poster.jpg",
+	"rang-de-basanti":   "https://upload.wikimedia.org/wikipedia/en/0/08/Rang_De_Basanti_poster.jpg",
+	"rocket-singh":      "https://upload.wikimedia.org/wikipedia/en/c/c3/Rocket_Singh_Salesman_of_the_Year.jpg",
+	"rrr":               "https://upload.wikimedia.org/wikipedia/en/d/d7/RRR_Poster.jpg",
+	"saathiya":          "https://upload.wikimedia.org/wikipedia/en/8/8d/Saathiya_film_poster.jpg",
+	"section-375":       "https://upload.wikimedia.org/wikipedia/en/9/90/Section_375_poster.jpg",
+	"shershaah":         "https://upload.wikimedia.org/wikipedia/en/9/91/Shershaah_film_poster.jpg",
+	"sholay":            "https://upload.wikimedia.org/wikipedia/en/5/52/Sholay-poster.jpg",
+	"special-26":        "https://upload.wikimedia.org/wikipedia/en/7/7c/Special_26_poster.jpg",
+	"stree":             "https://upload.wikimedia.org/wikipedia/en/4/4f/Stree_-_2018_Movie_Poster.jpg",
+	"stree-2":           "https://upload.wikimedia.org/wikipedia/en/a/a1/Stree_2.jpg",
+	"sultan":            "https://upload.wikimedia.org/wikipedia/en/1/1f/Sultan_film_poster.jpg",
+	"swades":            "https://upload.wikimedia.org/wikipedia/en/8/85/Swades_poster.jpg",
+	"taare-zameen-par":  "https://upload.wikimedia.org/wikipedia/en/b/b4/Taare_Zameen_Par_Like_Stars_on_Earth_poster.png",
+	"talvar":            "https://upload.wikimedia.org/wikipedia/en/9/91/TalvarFilmPoster.jpg",
+	"tanu-weds-manu":    "https://upload.wikimedia.org/wikipedia/en/c/c6/Tanuwedsmanu.jpg",
+	"thappad":           "https://upload.wikimedia.org/wikipedia/en/3/35/Thappad_film_poster.jpg",
+	"the-lunchbox":      "https://upload.wikimedia.org/wikipedia/en/8/81/The_Lunchbox_poster.jpg",
+	"tumbbad":           "https://upload.wikimedia.org/wikipedia/en/4/41/Tumbbad_poster.jpg",
+	"udaan":             "https://upload.wikimedia.org/wikipedia/en/7/71/Udaan_Movie_Poster.jpg",
+	"uri":               "https://upload.wikimedia.org/wikipedia/en/3/3b/URI_-_New_poster.jpg",
+	"veer-zaara":        "https://upload.wikimedia.org/wikipedia/en/1/1e/Veer-Zaara.jpg",
+	"vicky-donor":       "https://upload.wikimedia.org/wikipedia/en/2/2f/Vicky_Donor_Poster.jpg",
+	"wake-up-sid":       "https://upload.wikimedia.org/wikipedia/en/9/9f/Wake_up_Sid.jpg",
+	"znmd":              "https://upload.wikimedia.org/wikipedia/en/1/17/Zindagi_Na_Milegi_Dobara.jpg",
 
 	// ---------- Bollywood TV / web (9) ----------
 	"aspirants":     "https://upload.wikimedia.org/wikipedia/en/9/9b/Aspirants_TVF_logo.jpg",
