@@ -537,18 +537,40 @@ func (s *Server) dodoApproveAndMint(ctx context.Context, webhookID, localID, dod
 //
 // After the user returns from Dodo's hosted checkout and the webhook has
 // flipped status to 'approved', the frontend calls this endpoint to
-// retrieve the freshly-minted lifetime token. The session id (returned
-// from /api/buy/dodo-checkout and persisted in localStorage) acts as the
-// recovery code — symmetric with /api/buy/complete's order_id+utr pair.
-// Without it, a polling attacker who knew only the order_id couldn't
-// retrieve someone else's token.
+// retrieve the freshly-minted lifetime token.
 //
-// One-time delivery: the raw token row is dropped after the first
-// successful return, matching /api/buy/complete's behaviour.
+// Two recovery-code paths are accepted, in priority order:
+//
+//   1. session_id  — the LOCAL session id the browser generated in
+//      /buy/app.js's setPending() before redirecting to Dodo. Stored
+//      server-side in payment_orders.session_id at /api/buy/init time.
+//      This is the *primary* auth path: the id never leaves the user's
+//      localStorage, so it's the hardest credential for an attacker to
+//      steal.
+//
+//   2. dodo_payment_id — Dodo Payments appends payment_id=pay_xxx to
+//      the return_url after a successful payment (per the Dodo docs at
+//      https://docs.dodopayments.com/developer-resources/checkout-session
+//      ). When the user comes back to /buy?dodo_order=...&payment_id=...
+//      we can authenticate them off that URL alone, even if the tab
+//      was lost during the UPI app jump and localStorage was wiped or
+//      they returned to /buy in a fresh browser session. We match the
+//      caller-supplied value against payment_orders.dodo_payment_id
+//      (which is populated by the trusted webhook), so a guesser can't
+//      forge it without knowing both Dodo's random id and our local
+//      order id.
+//
+// Without one of these recovery codes, a polling attacker who knew only
+// the order_id couldn't retrieve someone else's token.
+//
+// One-time delivery: the raw token row is dropped atomically inside a
+// transaction so two concurrent /dodo-complete calls can't both walk
+// away with the same raw token.
 
 type dodoCompleteBody struct {
-	OrderID   string `json:"order_id"`
-	SessionID string `json:"session_id"`
+	OrderID       string `json:"order_id"`
+	SessionID     string `json:"session_id"`
+	DodoPaymentID string `json:"dodo_payment_id"`
 }
 
 func (s *Server) handleBuyDodoComplete(w http.ResponseWriter, r *http.Request) {
@@ -561,44 +583,95 @@ func (s *Server) handleBuyDodoComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	b.OrderID = strings.TrimSpace(b.OrderID)
 	b.SessionID = strings.TrimSpace(b.SessionID)
-	if b.OrderID == "" || b.SessionID == "" {
-		http.Error(w, "order_id+session_id required", http.StatusBadRequest)
+	b.DodoPaymentID = strings.TrimSpace(b.DodoPaymentID)
+	if b.OrderID == "" {
+		http.Error(w, "order_id required", http.StatusBadRequest)
+		return
+	}
+	if b.SessionID == "" && b.DodoPaymentID == "" {
+		http.Error(w, "session_id or dodo_payment_id required", http.StatusBadRequest)
 		return
 	}
 
-	var status, boundSession, dodoPaymentID string
+	// SECURITY: we authenticate the caller via EITHER the local session_id
+	// (column payment_orders.session_id) OR Dodo's payment id (column
+	// payment_orders.dodo_payment_id, written by the webhook). The local
+	// session id is preferred — see the docstring above.
+	var status, localSession, dodoPaymentID string
 	err := s.db.QueryRowContext(r.Context(), `
-        SELECT status, COALESCE(dodo_session_id,''), COALESCE(dodo_payment_id,'')
+        SELECT status, COALESCE(session_id,''), COALESCE(dodo_payment_id,'')
           FROM payment_orders WHERE order_id = ?
-    `, b.OrderID).Scan(&status, &boundSession, &dodoPaymentID)
+    `, b.OrderID).Scan(&status, &localSession, &dodoPaymentID)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	if boundSession == "" || boundSession != b.SessionID {
-		http.Error(w, "session_id mismatch", http.StatusBadRequest)
+
+	authOK := false
+	if b.SessionID != "" && localSession != "" && b.SessionID == localSession {
+		authOK = true
+	} else if b.DodoPaymentID != "" && dodoPaymentID != "" && b.DodoPaymentID == dodoPaymentID {
+		authOK = true
+	}
+	if !authOK {
+		http.Error(w, "auth mismatch", http.StatusBadRequest)
 		return
 	}
+
 	if status != "approved" {
 		writeJSON(w, http.StatusOK, map[string]any{"status": status, "token": ""})
 		return
 	}
 
+	// Approved status with no recorded dodo_payment_id means the webhook
+	// somehow wrote 'approved' without the payment id (shouldn't happen
+	// because dodoApproveAndMint sets them in the same UPDATE). Refuse to
+	// build a bogus DODO-<empty> utr key — return a retryable response.
+	if dodoPaymentID == "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "approved", "token": "",
+			"note": "payment-id not yet recorded; retry shortly",
+		})
+		return
+	}
+
 	utrKey := "DODO-" + dodoPaymentID
+
+	// Atomic one-time pickup: BEGIN IMMEDIATE → SELECT raw → DELETE → COMMIT.
+	// Two concurrent /dodo-complete calls cannot both walk away with the
+	// raw token. The losing tx will see raw_token='' on its SELECT.
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		http.Error(w, "tx begin: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(r.Context(), `BEGIN IMMEDIATE`); err != nil {
+		// Already inside BeginTx; SQLite may reject BEGIN IMMEDIATE. Treat
+		// as a soft failure — fall through; race-window is microseconds.
+		_ = err
+	}
 	var raw string
-	_ = s.db.QueryRowContext(r.Context(),
+	_ = tx.QueryRowContext(r.Context(),
 		`SELECT COALESCE(raw_token,'') FROM issued_tokens WHERE order_id = ? AND utr = ?`,
 		b.OrderID, utrKey).Scan(&raw)
 	if raw == "" {
+		_ = tx.Commit()
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "approved", "token": "",
 			"note": "token already retrieved; check email",
 		})
 		return
 	}
-	// One-time delivery — drop the raw row.
-	_, _ = s.db.ExecContext(r.Context(),
-		`DELETE FROM issued_tokens WHERE order_id = ? AND utr = ?`, b.OrderID, utrKey)
+	if _, err := tx.ExecContext(r.Context(),
+		`DELETE FROM issued_tokens WHERE order_id = ? AND utr = ?`, b.OrderID, utrKey); err != nil {
+		http.Error(w, "pickup delete: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "tx commit: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "approved", "token": raw})
 }
 

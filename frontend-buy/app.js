@@ -1,4 +1,4 @@
-// Rewire /buy — v1.8.2 production payment flow.
+// Rewire /buy — v1.8.3 production payment flow.
 //
 // Two entry paths:
 //
@@ -13,15 +13,25 @@
 //       Redirect: window.location = checkout_url.
 //
 //   (b) Return from Dodo (?dodo_order=<id> in URL):
+//       Dodo also appends &payment_id=pay_xxx&status=succeeded&email=…
+//       per https://docs.dodopayments.com/developer-resources/checkout-session
 //       Show "Confirming payment…" spinner. Start polling
 //       /api/buy/status?order_id=<id> every 2s for the first 30s,
 //       then every 5s up to 5 minutes.
-//         status='approved'  → POST /api/buy/dodo-complete { order_id, session_id }
+//         status='approved'  → POST /api/buy/dodo-complete
+//                              { order_id, session_id, dodo_payment_id }
 //                              → { token }
 //                              → save to localStorage (rw_premium_token)
 //                              → window.location.replace('/premium?t=' + token)
 //         status='rejected'  → show failure card.
 //         polling timeout    → show failure card with admin contact info.
+//
+//       Auth: server prefers session_id (LOCAL — kept in localStorage,
+//       never leaves the browser). Falls back to dodo_payment_id when the
+//       browser lost localStorage (UPI app jump killed the tab, etc.) —
+//       this works because Dodo appends payment_id to the return URL, so
+//       the bearer of the URL is the bearer of the token. Same security
+//       model as the email-delivery link.
 //
 // No user button mints a token. No raw VPA touches the DOM. No client-state
 // is trusted. The backend's Dodo webhook is the sole approver.
@@ -29,7 +39,7 @@
 (function () {
   'use strict';
 
-  var REWIRE_VERSION = '1.8.2';
+  var REWIRE_VERSION = '1.8.3';
 
   // ------- DOM helpers -------
   var $ = function (id) { return document.getElementById(id); };
@@ -224,7 +234,7 @@
   // STAGE B — Return-from-Dodo verification
   // ============================================================
 
-  function pollStatus(orderId, sessionId, email) {
+  function pollStatus(orderId, sessionId, email, dodoPaymentId) {
     show('stage-verify');
     var verifyMsg = $('verify-msg');
 
@@ -262,7 +272,7 @@
           var st = (r.body.status || '').toLowerCase();
           if (st === 'approved') {
             stop();
-            return fetchTokenAndRedirect(orderId, sessionId);
+            return fetchTokenAndRedirect(orderId, sessionId, dodoPaymentId);
           }
           if (st === 'rejected' || st === 'expired') {
             stop();
@@ -296,11 +306,15 @@
     tick();
   }
 
-  function fetchTokenAndRedirect(orderId, sessionId) {
-    postJSON('/api/buy/dodo-complete', {
-      order_id: orderId,
-      session_id: sessionId,
-    }).then(function (r) {
+  // fetchTokenAndRedirect tries the server-side one-time token pickup,
+  // sending whichever recovery credentials we have (session_id from
+  // localStorage and/or dodo_payment_id from the URL). The backend
+  // accepts either; passing both is fine.
+  function fetchTokenAndRedirect(orderId, sessionId, dodoPaymentId) {
+    var body = { order_id: orderId };
+    if (sessionId) body.session_id = sessionId;
+    if (dodoPaymentId) body.dodo_payment_id = dodoPaymentId;
+    postJSON('/api/buy/dodo-complete', body).then(function (r) {
       if (!r.ok || !r.body || !r.body.token) {
         // Token already picked up (one-time delivery) OR status drift.
         // Either way the order is approved — direct the user to /premium
@@ -368,16 +382,18 @@
       var orderId = dodoOrder;
       var sessionId = (pending && pending.order_id === orderId && pending.session_id) || '';
       var email = (pending && pending.order_id === orderId && pending.email) || '';
-      if (!sessionId) {
-        // Tab was closed between checkout creation and return — we lost
-        // the session_id needed by /dodo-complete. Polling /status still
-        // gives us status='approved' and the webhook still emails the
-        // token; we just can't auto-pick-up. Show success → /premium
-        // and let server-side / email handle it.
+      // Dodo appends payment_id=pay_xxx to the return URL after a
+      // successful payment. We use it as a fallback recovery code if
+      // localStorage was lost between checkout and return (UPI app
+      // jump can sometimes kill the browser tab on mobile).
+      var dodoPaymentId = getParam('payment_id');
+      if (!sessionId && !dodoPaymentId) {
+        // No localStorage AND no payment_id in URL — degraded path,
+        // poll /status and steer the user toward email recovery.
         pollStatusNoSession(orderId, email);
         return;
       }
-      pollStatus(orderId, sessionId, email);
+      pollStatus(orderId, sessionId, email, dodoPaymentId);
       return;
     }
 
@@ -386,9 +402,10 @@
     wireSelectStage();
   }
 
-  // pollStatusNoSession is the degraded path when we lack the local
-  // session_id (e.g. user cleared storage). Same polling loop but on
-  // approval we just go to /premium and surface email-delivery messaging.
+  // pollStatusNoSession is the truly-degraded path: we have neither
+  // the local session_id nor the dodo payment_id, so we can't claim
+  // the token on the server. Poll /status anyway; on approval, send
+  // the user to /premium and lean on email delivery.
   function pollStatusNoSession(orderId, email) {
     show('stage-verify');
     $('verify-msg').textContent =
