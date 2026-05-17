@@ -1,613 +1,430 @@
-// Rewire /buy — UPI checkout flow with manual UTR verification.
+// Rewire /buy — v1.8.1 production payment flow.
+//
+// Two entry paths:
+//
+//   (a) Fresh visit (?dodo_order=… absent in URL):
+//       Show payment selection card. User enters email → click "Pay ₹9".
+//       Frontend: POST /api/buy/init { email, anon_id, session_id }
+//         → { order_id }
+//       Frontend: POST /api/buy/dodo-checkout { order_id }
+//         → { checkout_url, session_id }
+//       Persist {order_id, session_id, email} in localStorage so the
+//       polling phase can recover them even if Dodo strips query params.
+//       Redirect: window.location = checkout_url.
+//
+//   (b) Return from Dodo (?dodo_order=<id> in URL):
+//       Show "Confirming payment…" spinner. Start polling
+//       /api/buy/status?order_id=<id> every 2s for the first 30s,
+//       then every 5s up to 5 minutes.
+//         status='approved'  → POST /api/buy/dodo-complete { order_id, session_id }
+//                              → { token }
+//                              → save to localStorage (rw_premium_token)
+//                              → window.location.replace('/premium?t=' + token)
+//         status='rejected'  → show failure card.
+//         polling timeout    → show failure card with admin contact info.
+//
+// No user button mints a token. No raw VPA touches the DOM. No client-state
+// is trusted. The backend's Dodo webhook is the sole approver.
+
 (function () {
   'use strict';
-  const $ = (s) => document.querySelector(s);
 
-  const SESSION_ID = (() => {
-    let s = sessionStorage.getItem('rw_sid');
-    if (!s) { s = uuid(); sessionStorage.setItem('rw_sid', s); }
-    return s;
-  })();
-  const ANON_ID = (() => {
-    let a = localStorage.getItem('rw_aid');
-    if (!a) { a = uuid(); localStorage.setItem('rw_aid', a); }
-    return a;
-  })();
-  function uuid() {
-    if (crypto && crypto.randomUUID) return crypto.randomUUID();
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-      const r = Math.random()*16|0, v = c==='x' ? r : (r&0x3|0x8);
-      return v.toString(16);
-    });
+  var REWIRE_VERSION = '1.8.1';
+
+  // ------- DOM helpers -------
+  var $ = function (id) { return document.getElementById(id); };
+  function show(stage) {
+    ['stage-select', 'stage-verify', 'stage-success', 'stage-fail']
+      .forEach(function (s) { $(s).classList.add('hidden'); });
+    $(stage).classList.remove('hidden');
+  }
+  function showErr(elId, msg) {
+    var el = $(elId);
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+  function hideErr(elId) {
+    var el = $(elId);
+    el.textContent = '';
+    el.classList.add('hidden');
   }
 
-  // ---------- Telemetry (funnel events) ----------
-  const evQueue = [];
-  function track(type, fields = {}) {
-    evQueue.push({
-      ts: Date.now(),
-      type,
-      movie_id: fields.movie_id,
-      duration_ms: fields.duration_ms,
-      extra: fields.extra,
-    });
-    if (evQueue.length >= 8) flushEvents();
-  }
-  async function flushEvents(useBeacon = false) {
-    if (evQueue.length === 0) return;
-    const batch = evQueue.splice(0, evQueue.length);
-    const body = JSON.stringify({
-      session_id: SESSION_ID, anon_id: ANON_ID,
-      os: navigator.platform || '', browser: '', device: '',
-      screen_w: window.innerWidth, screen_h: window.innerHeight,
-      mode: 'buy',
-      events: batch,
-    });
+  // ------- session ids -------
+  // anon_id is sticky per browser; session_id rotates per buy-flow attempt.
+  function getOrMakeAnonId() {
     try {
-      if (useBeacon && navigator.sendBeacon) {
-        navigator.sendBeacon('/api/events', new Blob([body], { type: 'application/json' }));
-      } else {
-        await fetch('/api/events', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body, keepalive: true,
+      var k = 'rw_anon_id';
+      var v = localStorage.getItem(k);
+      if (!v) {
+        v = 'a-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+        localStorage.setItem(k, v);
+      }
+      return v;
+    } catch (_) { return 'a-x'; }
+  }
+  function newSessionId() {
+    return 's-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  }
+
+  // ------- pending order persistence -------
+  // We keep the current attempt's {order_id, session_id, email} in
+  // localStorage under rw_pending_buy. Dodo *should* echo the order id
+  // back via ?dodo_order, but localStorage is the source of truth and
+  // also carries the session_id (which Dodo never sees), needed by
+  // /api/buy/dodo-complete for one-time-pickup security.
+  var PENDING_KEY = 'rw_pending_buy';
+  function setPending(p) {
+    try { localStorage.setItem(PENDING_KEY, JSON.stringify(p)); } catch (_) {}
+  }
+  function getPending() {
+    try { return JSON.parse(localStorage.getItem(PENDING_KEY) || '{}'); }
+    catch (_) { return {}; }
+  }
+  function clearPending() {
+    try { localStorage.removeItem(PENDING_KEY); } catch (_) {}
+  }
+
+  // ------- URL params -------
+  function getParam(name) {
+    var p = new URLSearchParams(window.location.search);
+    return (p.get(name) || '').trim();
+  }
+
+  // ------- HTTP helper -------
+  function postJSON(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+      credentials: 'same-origin',
+    }).then(function (r) {
+      return r.text().then(function (t) {
+        var j = null;
+        try { j = t ? JSON.parse(t) : null; } catch (_) { /* not json */ }
+        return { ok: r.ok, status: r.status, body: j, text: t };
+      });
+    });
+  }
+  function getJSON(url) {
+    return fetch(url, { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) {
+        return r.text().then(function (t) {
+          var j = null;
+          try { j = t ? JSON.parse(t) : null; } catch (_) { }
+          return { ok: r.ok, status: r.status, body: j, text: t };
         });
+      });
+  }
+
+  // ------- already-premium short-circuit -------
+  function existingTokenOrNull() {
+    try {
+      var t = (localStorage.getItem('rw_premium_token') || '').trim();
+      return t || null;
+    } catch (_) { return null; }
+  }
+
+  // ============================================================
+  // STAGE A — Pay button flow
+  // ============================================================
+
+  function wireSelectStage() {
+    var btn = $('pay-btn');
+    var input = $('email-input');
+
+    // Prefill email if we have one from a prior attempt.
+    var pending = getPending();
+    if (pending && pending.email) input.value = pending.email;
+
+    function submit() {
+      hideErr('select-err');
+      var email = (input.value || '').trim();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        showErr('select-err', 'Please enter a valid email address.');
+        input.focus();
+        return;
       }
-    } catch {}
-  }
-  setInterval(() => flushEvents(false), 5000);
-  window.addEventListener('pagehide', () => { track('session_end'); flushEvents(true); });
-  track('buy_page_open');
+      btn.disabled = true;
+      btn.textContent = 'Creating order…';
 
-  // ---------- State + step machine ----------
-  const STEPS = ['email', 'pay', 'utr', 'pending', 'done', 'recover'];
-  function show(step) {
-    STEPS.forEach(s => {
-      const el = document.getElementById('step-' + s);
-      if (el) el.classList.toggle('active', s === step);
-    });
-    window.scrollTo({ top: 0 });
-  }
-  let order = null;          // {order_id, deep_link, vpa, expires_at, ...}
-  let utrSubmitted = false;
-  let pollTimer = null;
+      var anonId = getOrMakeAnonId();
+      var sessionId = newSessionId();
 
-  // ---------- Step 1 — email ----------
-  // v1.7.1: dropped the "Confirm email" second field. The inline note now
-  // tells the user the token will be emailed here post-payment, so a single
-  // well-validated field is enough.
-  $('#goPay').addEventListener('click', async () => {
-    const e1 = $('#email').value.trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e1)) { alert('Please enter a valid email.'); return; }
-    track('buy_email_entered');
-    $('#goPay').disabled = true;
-    $('#goPay').textContent = 'Setting up…';
-    try {
-      const r = await fetch('/api/buy/init', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: e1, anon_id: ANON_ID, session_id: SESSION_ID }),
-      });
-      if (!r.ok) throw new Error(await r.text());
-      order = await r.json();
-      order.email = e1; // remember for Razorpay prefill
-      // v1.4.2: capture optional phone to skip Razorpay's contact step.
-      // Razorpay expects 10-digit only; the +91 prefix is added by the widget itself.
-      const phoneRaw = ($('#phone') && $('#phone').value || '').replace(/\D/g, '');
-      if (/^[6-9]\d{9}$/.test(phoneRaw)) order.contact = phoneRaw;
-      localStorage.setItem('rw_buy_order', JSON.stringify(order));
-      $('#orderRef').textContent = order.order_id;
-      $('#upiBtn').href = order.deep_link;
-      $('#qrImg').src = '/api/buy/qr?order_id=' + encodeURIComponent(order.order_id);
-      track('buy_order_created', { extra: { order_id: order.order_id } });
-      show('pay');
-    } catch (err) {
-      alert('Could not start order: ' + (err.message || err));
-    } finally {
-      $('#goPay').disabled = false;
-      $('#goPay').textContent = 'Continue to payment →';
-    }
-  });
-
-  // ---------- Recovery link ----------
-  $('#recoverLink').addEventListener('click', (e) => {
-    e.preventDefault();
-    track('buy_recover_open');
-    show('recover');
-  });
-  $('#backFromRecover').addEventListener('click', (e) => { e.preventDefault(); show('email'); });
-  $('#recSubmit').addEventListener('click', async () => {
-    const email = $('#recEmail').value.trim().toLowerCase();
-    const oid = $('#recOrder').value.trim();
-    if (!/^[^@\s]+@/.test(email) || !oid) { alert('Email + order id required'); return; }
-    $('#recSubmit').disabled = true;
-    try {
-      const r = await fetch('/api/buy/recover', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, order_id: oid }),
-      });
-      if (!r.ok) throw new Error(await r.text());
-      track('buy_recover_submit');
-      alert('If that order matches, a fresh token has been emailed to ' + email + '.');
-    } catch (err) {
-      alert('Recovery failed: ' + (err.message || err));
-    } finally {
-      $('#recSubmit').disabled = false;
-    }
-  });
-
-  // ---------- Step 2 — pay ----------
-  // v1.7.0: Dodo Payments primary (Razorpay merchant activation denied).
-  //         Razorpay retained as secondary/legacy. Manual UPI deep-link
-  //         remains as final fallback for self-hosters.
-
-  // Detect whether Dodo / Razorpay are configured server-side and pick the
-  // primary payment path.
-  let DODO_ENABLED = false;
-  let RZP_KEY_ID = null;
-  let RZP_ENABLED = false;
-  fetch('/api/version').then(r => r.ok ? r.json() : null).then(j => {
-    if (!j) {
-      const fb = $('#fallbackPay'); if (fb) fb.style.display = 'block';
-      return;
-    }
-    DODO_ENABLED = !!j.dodo_enabled;
-    RZP_ENABLED  = !!j.rzp_enabled;
-    RZP_KEY_ID   = j.rzp_key_id || null;
-
-    if (DODO_ENABLED) {
-      // Dodo wins. Show Dodo button, hide Razorpay UI completely, hide
-      // the manual fallback (Dodo handles UPI + card + netbanking).
-      const dodoBtn = $('#dodoBtn'); if (dodoBtn) dodoBtn.style.display = 'block';
-      const dodoNote = $('#dodoBtnNote'); if (dodoNote) dodoNote.style.display = 'block';
-      const rzpBtn = $('#rzpBtn');           if (rzpBtn) rzpBtn.style.display = 'none';
-      const rzpNote = $('#rzpBtnNote');      if (rzpNote) rzpNote.style.display = 'none';
-      const sim  = $('#rzpSimulateBtn');     if (sim)  sim.style.display = 'none';
-      const simNote = $('#rzpSimulateNote'); if (simNote) simNote.style.display = 'none';
-      const hint = $('#testModeHint');       if (hint) hint.style.display = 'none';
-      const fb = $('#fallbackPay');          if (fb) fb.style.display = 'none';
-      return;
-    }
-
-    if (RZP_ENABLED && RZP_KEY_ID) {
-      const fb = $('#fallbackPay'); if (fb) fb.style.display = 'none';
-      // v1.4.4: in test mode, demote the (broken) Razorpay button and
-      // promote the green simulate button to primary. Reveal the test hint.
-      if (/^rzp_test_/.test(RZP_KEY_ID)) {
-        const hint = $('#testModeHint');
-        if (hint) hint.style.display = 'block';
-        const sim  = $('#rzpSimulateBtn');
-        const note = $('#rzpSimulateNote');
-        const blue = $('#rzpBtn');
-        const blueNote = $('#rzpBtnNote');
-        if (sim)  sim.style.display  = 'block';
-        if (note) note.style.display = 'block';
-        if (blue) {
-          blue.style.fontSize = '13.5px';
-          blue.style.padding = '12px';
-          blue.style.opacity = '0.55';
-          blue.style.marginTop = '14px';
-          blue.style.background = 'rgba(255,255,255,0.06)';
-          blue.style.border = '1px solid rgba(255,255,255,0.12)';
-          blue.textContent = '🔵 Try Razorpay sheet (may fail in test mode)';
+      postJSON('/api/buy/init', {
+        email: email,
+        anon_id: anonId,
+        session_id: sessionId,
+      }).then(function (r) {
+        if (!r.ok || !r.body || !r.body.order_id) {
+          throw new Error(r.text || ('init failed: HTTP ' + r.status));
         }
-        if (blueNote) blueNote.style.display = 'none';
-      }
-    } else {
-      const fb = $('#fallbackPay');
-      if (fb) fb.style.display = 'block';
-      const rzpBtn = $('#rzpBtn');
-      if (rzpBtn) rzpBtn.style.display = 'none';
-    }
-  }).catch(() => {
-    // If /api/version fails, fall back gracefully.
-    const fb = $('#fallbackPay');
-    if (fb) fb.style.display = 'block';
-  });
-
-  // v1.7.0 — Dodo button. Creates a hosted checkout session and redirects.
-  $('#dodoBtn').addEventListener('click', async () => {
-    if (!order) { alert('Lost order context. Please refresh.'); return; }
-    const btn = $('#dodoBtn');
-    btn.disabled = true;
-    btn.textContent = 'Opening payment…';
-    track('buy_dodo_clicked');
-    try {
-      const r = await fetch('/api/buy/dodo-checkout', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          order_id: order.order_id,
-          contact: (order && order.contact) || '',
-        }),
-      });
-      if (!r.ok) throw new Error(await r.text());
-      const j = await r.json();
-      if (j.already_paid) {
-        startPolling();
-        show('pending');
-        return;
-      }
-      if (!j.checkout_url) throw new Error('dodo did not return a checkout url');
-      // Persist the session id — it acts as the recovery code we'll
-      // present to /api/buy/dodo-complete after webhook approval.
-      if (j.session_id) {
-        order.dodo_session_id = j.session_id;
-        localStorage.setItem('rw_buy_order', JSON.stringify(order));
-      }
-      localStorage.setItem('rw_buy_pending', '1');
-      // Flush analytics before navigating away.
-      flushEvents(true);
-      window.location.href = j.checkout_url;
-    } catch (err) {
-      alert('Could not start payment: ' + (err.message || err));
-      btn.disabled = false;
-      btn.textContent = '⚡ Pay ₹9 — instant unlock';
-    }
-  });
-
-  $('#rzpBtn').addEventListener('click', async () => {
-    if (!order) { alert('Lost order context. Please refresh.'); return; }
-    if (!window.Razorpay) {
-      alert('Razorpay checkout failed to load. Please retry, or use the manual UPI option below.');
-      const fb = $('#fallbackPay');
-      if (fb) fb.style.display = 'block';
-      return;
-    }
-    $('#rzpBtn').disabled = true;
-    $('#rzpBtn').textContent = 'Opening payment…';
-    track('buy_rzp_clicked');
-    try {
-      const r = await fetch('/api/buy/rzp-order', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_id: order.order_id }),
-      });
-      if (!r.ok) {
-        const txt = await r.text();
-        throw new Error(txt || 'rzp-order failed');
-      }
-      const j = await r.json();
-      if (j.already_paid) {
-        // Re-poll status to retrieve token.
-        startPolling();
-        show('pending');
-        return;
-      }
-
-      const opts = {
-        key: j.key_id || RZP_KEY_ID,
-        amount: j.amount,
-        currency: j.currency || 'INR',
-        order_id: j.rzp_order_id,
-        name: 'Rewire',
-        description: 'Premium · Lifetime',
-        prefill: {
-          email: (order && order.email) || '',
-          contact: (order && order.contact) || '',
-        },
-        theme: { color: '#ff007a' },
-        // v1.4.1: Drop the `method: { upi: true, card: false, ... }`
-        // restriction. In Razorpay test mode (especially on desktop, where
-        // UPI Intent doesn't apply directly), restricting to UPI-only can
-        // leave the sheet empty if the merchant account doesn't have all
-        // UPI flows enabled. Letting Razorpay show its default set (UPI +
-        // Card + Netbanking + Wallet) is bulletproof: mobile users still
-        // see UPI tiles prominently, desktop users get test-card / QR
-        // fallbacks. UPI auto-shows first when the device supports it.
-        handler: async (resp) => {
-          // Success path. Verify on server, get token.
-          track('buy_rzp_success', { extra: { rzp_payment_id: resp.razorpay_payment_id } });
-          try {
-            const vr = await fetch('/api/buy/rzp-verify', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                order_id: order.order_id,
-                rzp_order_id: resp.razorpay_order_id,
-                rzp_payment_id: resp.razorpay_payment_id,
-                rzp_signature: resp.razorpay_signature,
-              }),
-            });
-            if (!vr.ok) throw new Error(await vr.text());
-            const vj = await vr.json();
-            if (vj.token) {
-              localStorage.setItem('rw_premium_token', vj.token);
-              $('#tokenBox').textContent = vj.token;
-            }
-            track('buy_token_unlocked');
-            show('done');
-          } catch (err) {
-            alert('Payment succeeded but verification failed: ' + (err.message || err) +
-                  '\n\nWe will reconcile and email your token to ' + ((order && order.email) || 'you') +
-                  ' shortly. For urgent help: admin@gogillu.live');
-            show('pending');
-            startPolling();
-          }
-        },
-        modal: {
-          ondismiss: () => {
-            track('buy_rzp_dismissed');
-            $('#rzpBtn').disabled = false;
-            $('#rzpBtn').textContent = '⚡ Pay ₹9 — instant unlock';
-          },
-        },
-      };
-      const rzp = new Razorpay(opts);
-      rzp.on('payment.failed', (resp) => {
-        track('buy_rzp_failed', { extra: { code: resp.error?.code, reason: resp.error?.reason } });
-        alert('Payment failed: ' + (resp.error?.description || 'unknown') +
-              '\n\nReason: ' + (resp.error?.reason || '') +
-              '\n\nTry again, or use the manual UPI option below.');
-        const fb = $('#fallbackPay');
-        if (fb) fb.style.display = 'block';
-        $('#rzpBtn').disabled = false;
-        $('#rzpBtn').textContent = '⚡ Pay ₹9 — instant unlock';
-      });
-      rzp.open();
-    } catch (err) {
-      alert('Could not start payment: ' + (err.message || err));
-      $('#rzpBtn').disabled = false;
-      $('#rzpBtn').textContent = '⚡ Pay ₹9 — instant unlock';
-      const fb = $('#fallbackPay');
-      if (fb) fb.style.display = 'block';
-    }
-  });
-
-  // v1.4.3: Test-mode simulate button. Synthesizes a valid HMAC server-side
-  // and runs the full verify path. Mints a real lifetime token; refuses on
-  // live keys server-side. Lets the user exercise end-to-end token issuance
-  // without depending on Razorpay's UPI activation.
-  $('#rzpSimulateBtn').addEventListener('click', async () => {
-    if (!order) { alert('Lost order context. Please refresh.'); return; }
-    const sim = $('#rzpSimulateBtn');
-    sim.disabled = true;
-    sim.textContent = 'Simulating…';
-    track('buy_rzp_simulate_clicked');
-    try {
-      // First, ensure an rzp_order_id is bound to the local order.
-      const ro = await fetch('/api/buy/rzp-order', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_id: order.order_id }),
-      });
-      if (!ro.ok) throw new Error('rzp-order: ' + (await ro.text()));
-      // Now run the simulate.
-      const r = await fetch('/api/buy/rzp-test-simulate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_id: order.order_id }),
-      });
-      if (!r.ok) throw new Error('simulate: ' + (await r.text()));
-      const j = await r.json();
-      if (j.token) {
-        localStorage.setItem('rw_premium_token', j.token);
-        $('#tokenBox').textContent = j.token;
-        track('buy_token_unlocked');
-        show('done');
-      } else {
-        throw new Error('no token in response');
-      }
-    } catch (err) {
-      alert('Simulation failed: ' + (err.message || err));
-    } finally {
-      sim.disabled = false;
-      sim.textContent = '🧪 Simulate test payment (skip Razorpay sheet)';
-    }
-  });
-
-  // Fallback chain (only visible if Razorpay not configured / failed).
-  $('#upiBtn').addEventListener('click', () => track('buy_upi_app_clicked'));
-
-  // v1.2: One-tap honor claim. Token is minted + emailed instantly; admin
-  // reconciles offline.
-  $('#claimBtn').addEventListener('click', async () => {
-    if (!order) { alert('Lost order context. Please refresh.'); return; }
-    $('#claimBtn').disabled = true;
-    $('#claimBtn').textContent = 'Unlocking…';
-    track('buy_claim_clicked');
-    try {
-      const r = await fetch('/api/buy/claim', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_id: order.order_id, utr: '' }),
-      });
-      if (r.status === 409) {
-        const txt = await r.text();
-        alert(txt || 'Already claimed.');
-        return;
-      }
-      if (r.status === 429) {
-        alert('Too many claims from this network. Please wait or contact admin@gogillu.live.');
-        return;
-      }
-      if (!r.ok) throw new Error(await r.text());
-      const j = await r.json();
-      if (j.token) {
-        localStorage.setItem('rw_premium_token', j.token);
-        $('#tokenBox').textContent = j.token;
-      } else {
-        $('#tokenBox').textContent = '(token already retrieved — check your email)';
-      }
-      track('buy_token_unlocked');
-      show('done');
-    } catch (err) {
-      alert('Unlock failed: ' + (err.message || err) + '\n\nIf you paid, write to admin@gogillu.live with order ' + (order && order.order_id) + '.');
-    } finally {
-      $('#claimBtn').disabled = false;
-      $('#claimBtn').textContent = '✨ I\u0027ve paid — unlock now';
-    }
-  });
-
-  // ---------- Step 4 — Pending → poll ----------
-  $('#pollBtn').addEventListener('click', () => poll(true));
-  // v1.7.0: two-tier polling. Right after returning from Dodo checkout we
-  // poll every 2 s for the first 60 s (covers normal webhook latency),
-  // then back off to 30 s for up to 10 min, then stop. Without this the
-  // 30-s-only loop would leave the user staring at "pending" for half a
-  // minute after a successful pay.
-  let pollStartedAt = 0;
-  function startPolling(fastMode) {
-    if (pollTimer) return;
-    pollStartedAt = Date.now();
-    poll(false);
-    schedulePoll(fastMode === true);
-  }
-  function schedulePoll(fast) {
-    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
-    const elapsed = Date.now() - pollStartedAt;
-    if (elapsed > 10 * 60 * 1000) {
-      // After 10 min, stop. User can press the manual button.
-      return;
-    }
-    const interval = (fast && elapsed < 60 * 1000) ? 2000 : 30000;
-    pollTimer = setTimeout(() => {
-      poll(false).finally(() => schedulePoll(fast));
-    }, interval);
-  }
-  async function poll(showAlert) {
-    if (!order) return;
-    try {
-      const r = await fetch('/api/buy/status?order_id=' + encodeURIComponent(order.order_id));
-      if (!r.ok) throw new Error(await r.text());
-      const j = await r.json();
-      track('buy_status_poll', { extra: { status: j.status } });
-      if (j.status === 'approved') {
-        if (pollTimer) { clearTimeout(pollTimer); clearInterval(pollTimer); pollTimer = null; }
-        await completeAndUnlock();
-      } else if (j.status === 'rejected') {
-        if (pollTimer) { clearTimeout(pollTimer); clearInterval(pollTimer); pollTimer = null; }
-        alert('Sadly your order was rejected. Please write to admin@gogillu.live with proof of payment.');
-      } else if (showAlert) {
-        alert('Still pending — check back soon. We notify by email too.');
-      }
-    } catch (err) {
-      if (showAlert) alert('Status check failed: ' + (err.message || err));
-    }
-  }
-  async function completeAndUnlock() {
-    // v1.7.0: choose completion endpoint based on which provider issued
-    // the order. Dodo orders carry a dodo_session_id (set when /buy/dodo-checkout
-    // returned). Razorpay & manual orders use the legacy UTR-based path.
-    const dodoSession = (order && order.dodo_session_id) || '';
-    if (dodoSession) {
-      try {
-        const r = await fetch('/api/buy/dodo-complete', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ order_id: order.order_id, session_id: dodoSession }),
+        var orderId = r.body.order_id;
+        var expiresAt = r.body.expires_at || (Date.now() + 24 * 60 * 60 * 1000);
+        // Persist BEFORE going to Dodo so the return-from-Dodo flow can
+        // recover even if the user closes/reopens the tab.
+        setPending({
+          order_id: orderId,
+          session_id: sessionId,
+          email: email,
+          expires_at: expiresAt,
+          ts: Date.now(),
         });
-        if (!r.ok) throw new Error(await r.text());
-        const j = await r.json();
-        if (j.token) {
-          localStorage.setItem('rw_premium_token', j.token);
-          $('#tokenBox').textContent = j.token;
-          track('buy_token_unlocked');
-        } else {
-          $('#tokenBox').textContent = '(token already retrieved — check your email)';
-        }
-        localStorage.removeItem('rw_buy_pending');
-        show('done');
-      } catch (err) {
-        alert('Approved! But token fetch failed. Check your email — the token has been mailed.');
-        show('done');
-      }
-      return;
-    }
-    const utr = localStorage.getItem('rw_buy_utr') || '';
-    try {
-      const r = await fetch('/api/buy/complete', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_id: order.order_id, utr }),
+        // Wire the home-page abandonment nudge (see frontend/app.js).
+        // It looks for rw_buy_pending_nudge { order_id, expires_at } and
+        // pops a sticky banner on / if the user never finishes payment.
+        try {
+          localStorage.setItem('rw_buy_pending_nudge', JSON.stringify({
+            order_id: orderId,
+            expires_at: expiresAt,
+            email: email,
+          }));
+          localStorage.removeItem('rw_buy_nudge_off');
+        } catch (_) { }
+
+        btn.textContent = 'Opening secure checkout…';
+        return postJSON('/api/buy/dodo-checkout', {
+          order_id: orderId,
+          contact: email,
+        }).then(function (r2) {
+          if (!r2.ok || !r2.body) {
+            throw new Error(r2.text || ('checkout failed: HTTP ' + r2.status));
+          }
+          if (r2.body.already_paid) {
+            // Defensive — the same email/order already approved.
+            // Drive through the verify stage which will fetch the token.
+            window.location.replace('/buy?dodo_order=' + encodeURIComponent(orderId));
+            return;
+          }
+          if (!r2.body.checkout_url) {
+            throw new Error('Checkout URL missing from server response.');
+          }
+          // Pin the Dodo session id (different from our local session id)
+          // alongside the local session id we use for /dodo-complete.
+          var p = getPending();
+          p.dodo_session_id = r2.body.session_id || '';
+          setPending(p);
+          // Go to Dodo's hosted page.
+          window.location.assign(r2.body.checkout_url);
+        });
+      }).catch(function (e) {
+        btn.disabled = false;
+        btn.textContent = 'Pay ₹9 →';
+        var msg = (e && e.message ? e.message : 'Could not start checkout.').slice(0, 280);
+        showErr('select-err', msg);
       });
-      const j = await r.json();
-      if (j.token) {
-        localStorage.setItem('rw_premium_token', j.token);
-        $('#tokenBox').textContent = j.token;
-        track('buy_token_unlocked');
-      } else {
-        $('#tokenBox').textContent = '(token already retrieved — check your email)';
-      }
-      show('done');
-    } catch (err) {
-      alert('Approved! But token fetch failed. Check your email — the token has been mailed.');
-      show('done');
     }
+
+    btn.addEventListener('click', submit);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') submit();
+    });
   }
-  $('#goPremium').addEventListener('click', () => {
-    track('buy_open_premium');
-    window.location.href = '/premium';
-  });
 
-  // ---------- Resume on reload ----------
-  // v1.2: with the one-tap claim flow, resume just drops the user back on
-  // the pay screen (with the order context restored). If they already
-  // unlocked and have a token, /premium handles that and we don't need
-  // to do anything special here.
-  // v1.7.0: also handles return-from-Dodo. Dodo's hosted checkout
-  // redirects to /buy?dodo_order=<localid> on completion. We trust the
-  // server-side webhook to flip the status (no signed client payload);
-  // the frontend just polls /api/buy/status until approved.
-  (function resume() {
-    let returnFromDodo = false;
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const dodoOrderInUrl = params.get('dodo_order');
-      if (dodoOrderInUrl) {
-        returnFromDodo = true;
-        // Strip the query string from the address bar so a reload
-        // doesn't re-trigger this branch.
-        const cleanUrl = window.location.pathname + window.location.hash;
-        try { window.history.replaceState({}, '', cleanUrl); } catch {}
+  // ============================================================
+  // STAGE B — Return-from-Dodo verification
+  // ============================================================
+
+  function pollStatus(orderId, sessionId, email) {
+    show('stage-verify');
+    var verifyMsg = $('verify-msg');
+
+    // Polling schedule: fast (every 2s) for the first 30s, then slower
+    // (every 5s) up to 5 minutes total. Web-hooks deliver in 1-5s
+    // typically; the long tail covers UPI bank settlement delay.
+    var fastUntil = Date.now() + 30 * 1000;
+    var hardStop = Date.now() + 5 * 60 * 1000;
+    var attempts = 0;
+    var stopped = false;
+
+    function stop() { stopped = true; }
+
+    function tick() {
+      if (stopped) return;
+      attempts++;
+      if (attempts === 5) {
+        verifyMsg.textContent =
+          'Still waiting for confirmation from your bank — this is normal for UPI, ' +
+          'usually under a minute.';
       }
-    } catch {}
-
-    const saved = localStorage.getItem('rw_buy_order');
-    if (!saved) return;
-    try {
-      const o = JSON.parse(saved);
-      if (!o.expires_at || Date.now() > o.expires_at) {
-        localStorage.removeItem('rw_buy_order');
-        localStorage.removeItem('rw_buy_utr');
-        localStorage.removeItem('rw_buy_pending');
-        return;
-      }
-      order = o;
-      $('#orderRef').textContent = o.order_id;
-      $('#upiBtn').href = o.deep_link;
-      $('#qrImg').src = '/api/buy/qr?order_id=' + encodeURIComponent(o.order_id);
-
-      // If we're returning from Dodo, jump straight to the pending screen
-      // and start fast-polling — the webhook may already have approved the
-      // order by the time we land here, or it'll arrive within seconds.
-      if (returnFromDodo) {
-        $('#pendingOrder').textContent = o.order_id;
-        show('pending');
-        startPolling(true);
-        track('buy_dodo_return');
-        return;
+      if (attempts === 30) {
+        verifyMsg.textContent =
+          'Taking longer than usual. Hang tight — we\u2019ll redirect you the ' +
+          'instant the payment confirms.';
       }
 
-      // Check status — if already approved, skip directly to done.
-      fetch('/api/buy/status?order_id=' + encodeURIComponent(o.order_id))
-        .then(r => r.ok ? r.json() : null)
-        .then(j => {
-          if (j && (j.status === 'approved' || j.status === 'pending_verify') &&
-              localStorage.getItem('rw_premium_token')) {
-            $('#tokenBox').textContent = localStorage.getItem('rw_premium_token');
-            show('done');
-            return;
+      getJSON('/api/buy/status?order_id=' + encodeURIComponent(orderId))
+        .then(function (r) {
+          if (stopped) return;
+          if (!r.ok || !r.body) {
+            // Network blip — keep polling silently.
+            return scheduleNext();
           }
-          // If status is already approved but we don't have the token,
-          // try to fetch it. (Edge case: user closed the tab right after
-          // Dodo webhook approval.)
-          if (j && j.status === 'approved') {
-            completeAndUnlock();
-            return;
+          var st = (r.body.status || '').toLowerCase();
+          if (st === 'approved') {
+            stop();
+            return fetchTokenAndRedirect(orderId, sessionId);
           }
-          // Pending: if we have a hint we're mid-flow from Dodo, poll.
-          if (localStorage.getItem('rw_buy_pending') === '1') {
-            $('#pendingOrder').textContent = o.order_id;
-            show('pending');
-            // Was mid-checkout — assume Dodo and poll fast.
-            startPolling(true);
-            return;
+          if (st === 'rejected' || st === 'expired') {
+            stop();
+            return showFailure(orderId, email,
+              'Your payment was ' + st + '. If you were charged, ' +
+              'please email admin@gogillu.live.');
           }
-          show('pay');
+          // 'initiated' / 'pending_verify' / 'utr_submitted' → keep polling.
+          scheduleNext();
         })
-        .catch(() => show('pay'));
-    } catch {}
-  })();
+        .catch(function () {
+          if (!stopped) scheduleNext();
+        });
+    }
+
+    function scheduleNext() {
+      if (stopped) return;
+      if (Date.now() > hardStop) {
+        stop();
+        return showFailure(orderId, email,
+          'We didn\u2019t hear back from Dodo within 5 minutes. If you ' +
+          'completed the payment, your token will arrive by email — ' +
+          'no further action needed.');
+      }
+      var interval = Date.now() < fastUntil ? 2000 : 5000;
+      setTimeout(tick, interval);
+    }
+
+    // Kick off immediately (don't wait 2s for first poll — webhook may
+    // already have landed before the redirect even returned).
+    tick();
+  }
+
+  function fetchTokenAndRedirect(orderId, sessionId) {
+    postJSON('/api/buy/dodo-complete', {
+      order_id: orderId,
+      session_id: sessionId,
+    }).then(function (r) {
+      if (!r.ok || !r.body || !r.body.token) {
+        // Token already picked up (one-time delivery) OR status drift.
+        // Either way the order is approved — direct the user to /premium
+        // and let the recovery flow there handle it.
+        show('stage-success');
+        clearPending();
+        try { localStorage.removeItem('rw_buy_pending_nudge'); } catch (_) { }
+        return setTimeout(function () {
+          window.location.replace('/premium');
+        }, 600);
+      }
+      try {
+        localStorage.setItem('rw_premium_token', r.body.token);
+        localStorage.removeItem(PENDING_KEY);
+        localStorage.removeItem('rw_buy_pending_nudge');
+      } catch (_) {}
+      show('stage-success');
+      setTimeout(function () {
+        window.location.replace('/premium?t=' + encodeURIComponent(r.body.token));
+      }, 700);
+    }).catch(function (e) {
+      // Approved server-side but we couldn't pull the token client-side
+      // — degrade gracefully to /premium where the recovery flow runs.
+      show('stage-success');
+      setTimeout(function () { window.location.replace('/premium'); }, 800);
+    });
+  }
+
+  function showFailure(orderId, email, msg) {
+    show('stage-fail');
+    $('fail-order').textContent = orderId || '—';
+    if (email) $('fail-email').textContent = email;
+    if (msg) {
+      var verr = $('verify-err');
+      verr.textContent = msg;
+      verr.classList.remove('hidden');
+    }
+    $('fail-retry').addEventListener('click', function () {
+      clearPending();
+      // Clean URL of dodo_order so a fresh attempt starts in stage-select.
+      var u = new URL(window.location.href);
+      u.searchParams.delete('dodo_order');
+      window.location.replace(u.toString());
+    }, { once: true });
+  }
+
+  // ============================================================
+  // entry
+  // ============================================================
+
+  function init() {
+    window.REWIRE_VERSION = REWIRE_VERSION;
+
+    // If user already has a premium token, bypass the buy flow entirely.
+    var existing = existingTokenOrNull();
+    if (existing) {
+      window.location.replace('/premium?t=' + encodeURIComponent(existing));
+      return;
+    }
+
+    var dodoOrder = getParam('dodo_order');
+    if (dodoOrder) {
+      // Returning from Dodo. Reconcile with localStorage pending state.
+      var pending = getPending();
+      var orderId = dodoOrder;
+      var sessionId = (pending && pending.order_id === orderId && pending.session_id) || '';
+      var email = (pending && pending.order_id === orderId && pending.email) || '';
+      if (!sessionId) {
+        // Tab was closed between checkout creation and return — we lost
+        // the session_id needed by /dodo-complete. Polling /status still
+        // gives us status='approved' and the webhook still emails the
+        // token; we just can't auto-pick-up. Show success → /premium
+        // and let server-side / email handle it.
+        pollStatusNoSession(orderId, email);
+        return;
+      }
+      pollStatus(orderId, sessionId, email);
+      return;
+    }
+
+    // Default: payment selection.
+    show('stage-select');
+    wireSelectStage();
+  }
+
+  // pollStatusNoSession is the degraded path when we lack the local
+  // session_id (e.g. user cleared storage). Same polling loop but on
+  // approval we just go to /premium and surface email-delivery messaging.
+  function pollStatusNoSession(orderId, email) {
+    show('stage-verify');
+    $('verify-msg').textContent =
+      'Your browser doesn\u2019t have the session token for this order — ' +
+      'we\u2019ll still confirm your payment server-side and email you the ' +
+      'access link.';
+    var hardStop = Date.now() + 5 * 60 * 1000;
+    (function tick() {
+      if (Date.now() > hardStop) {
+        return showFailure(orderId, email,
+          'We didn\u2019t hear back from Dodo within 5 minutes. If you ' +
+          'completed the payment, the lifetime token will be emailed to you.');
+      }
+      getJSON('/api/buy/status?order_id=' + encodeURIComponent(orderId))
+        .then(function (r) {
+          var st = r && r.body && (r.body.status || '').toLowerCase();
+          if (st === 'approved') {
+            show('stage-success');
+            return setTimeout(function () {
+              window.location.replace('/premium');
+            }, 800);
+          }
+          if (st === 'rejected' || st === 'expired') {
+            return showFailure(orderId, email,
+              'Your payment was ' + st + '. If you were charged, ' +
+              'please email admin@gogillu.live.');
+          }
+          setTimeout(tick, 3000);
+        })
+        .catch(function () { setTimeout(tick, 3000); });
+    })();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();

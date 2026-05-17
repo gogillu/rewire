@@ -5,8 +5,26 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0a0f">
 <title>Rewire Premium — ₹9 lifetime</title>
-<!-- v1.4.0: Razorpay checkout for true tap-and-pay UPI -->
-<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<!--
+  v1.8.1 — Production payment flow.
+
+  Payment processor:  Dodo Payments hosted checkout (UPI / cards via Dodo).
+  Verification:       Standard-Webhooks-signed payment.succeeded event
+                      from Dodo flips order.status to 'approved' on the
+                      backend. The frontend never trusts client state.
+  Redirect:           As soon as the webhook lands, /api/buy/status
+                      returns 'approved'. The browser polls it on the
+                      return-from-Dodo screen and auto-redirects to
+                      /premium?t=<token>. Zero manual buttons.
+
+  Removed in v1.8.1:
+    * Manual "I've paid" honor button (server returns HTTP 410)
+    * Hardcoded merchant VPA in served HTML
+    * Direct UPI QR / upi:// deep-link buttons
+    * Stale Razorpay / Dodo legacy scripts
+
+  See backend/buy_dodo.go for the server-side contract.
+-->
 <style>
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
@@ -30,336 +48,253 @@ html, body {
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent;
   font-weight: 800;
-  text-align: center;
-  margin-bottom: 14px;
+  margin-bottom: 6px;
 }
 h1 {
-  font-size: clamp(24px, 6vw, 32px);
-  margin: 0 0 6px;
+  margin: 0 0 4px;
+  font-size: 28px;
+  line-height: 1.15;
   font-weight: 800;
-  text-align: center;
+  letter-spacing: -0.5px;
 }
-.tag {
-  text-align: center;
-  font-size: 13px;
-  opacity: .65;
-  letter-spacing: .4px;
-  margin-bottom: 26px;
+.sub {
+  opacity: .72; font-size: 14px; margin: 0 0 22px;
 }
-.perks {
+.card {
   background: rgba(255,255,255,.04);
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 18px;
-  padding: 16px 18px;
-  margin-bottom: 24px;
-}
-.perks li {
-  list-style: none;
-  padding: 6px 0;
-  font-size: 14px;
-  display: flex; align-items: center; gap: 10px;
-}
-.perks li::before {
-  content: "✦";
-  color: #ff8a00;
-  font-size: 14px;
-}
-.perks ul { margin: 0; padding: 0; }
-.price {
-  text-align: center;
-  font-size: 14px;
-  letter-spacing: .3px;
-  opacity: .7;
+  padding: 20px;
   margin-bottom: 16px;
 }
-.price b {
-  font-size: 38px;
-  display: block;
-  background-image: linear-gradient(90deg, #ff8a00, #ff007a 50%, #8e2de2);
+.card h2 {
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+  opacity: .85;
+}
+.price-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 8px 0;
+}
+.price-row .lbl { opacity: .7; font-size: 14px; }
+.price-row .val { font-size: 15px; font-weight: 600; }
+.price-row.total .lbl { opacity: 1; font-weight: 600; font-size: 15px; }
+.price-row.total .val {
+  font-size: 22px; font-weight: 800;
+  background-image: linear-gradient(90deg, #ff8a00, #ff007a);
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent;
-  font-weight: 900;
-  margin-bottom: 4px;
 }
-.field { margin-bottom: 12px; }
-.field label {
-  display: block; font-size: 12px; opacity: .65;
-  letter-spacing: .4px; text-transform: uppercase;
-  margin-bottom: 6px;
+.divider {
+  height: 1px;
+  background: rgba(255,255,255,.08);
+  margin: 6px 0;
 }
-.field input {
-  width: 100%;
-  background: rgba(255,255,255,.05);
-  border: 1px solid rgba(255,255,255,.1);
-  border-radius: 12px;
-  padding: 12px 14px;
-  color: #fff;
-  font: inherit;
-  font-size: 16px;
+.feat {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 6px 0;
+  font-size: 14px;
 }
-.field input:focus { outline: none; border-color: rgba(255,138,0,.6); }
-.note {
-  font-size: 11px;
-  opacity: .55;
-  margin-top: 6px;
-  letter-spacing: .2px;
-}
-.btn {
-  width: 100%;
-  background: linear-gradient(90deg, #ff007a, #ff8a00);
-  color: #fff;
-  border: 0;
-  padding: 14px 18px;
-  border-radius: 14px;
-  font-weight: 800;
-  font-size: 15px;
-  letter-spacing: .5px;
-  cursor: pointer;
-  margin-top: 8px;
-  transition: transform .15s ease, opacity .2s ease;
-}
-.btn:active { transform: scale(.98); }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
-.btn.secondary {
-  background: rgba(255,255,255,.06);
-  border: 1px solid rgba(255,255,255,.12);
-  color: #fff;
-}
-.step { display: none; }
-.step.active { display: block; }
-.qr {
-  background: #fff;
-  border-radius: 18px;
-  padding: 12px;
-  margin: 12px auto 12px;
-  width: 220px;
-  height: 220px;
+.feat .check {
+  flex-shrink: 0;
+  width: 18px; height: 18px;
+  background: linear-gradient(135deg, #ff007a, #ff8a00);
+  border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  text-align: center;
+  font-size: 11px; font-weight: 800;
+  margin-top: 1px;
 }
-.qr img {
+label {
+  display: block;
+  font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase;
+  opacity: .7; margin-bottom: 6px;
+}
+input[type="email"] {
+  width: 100%;
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 12px;
+  color: #fff;
+  font-size: 16px;
+  padding: 14px 16px;
+  outline: none;
+  transition: border-color .15s;
+}
+input[type="email"]:focus {
+  border-color: rgba(255,0,122,.6);
+}
+.btn-primary {
   display: block;
   width: 100%;
-  height: 100%;
-  object-fit: contain;
-  border-radius: 8px;
-}
-.upi-row {
-  display: flex; align-items: center; gap: 10px;
-  background: rgba(255,255,255,.06);
-  padding: 12px 14px;
-  border-radius: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 14px;
-  margin: 12px 0;
-}
-.upi-row code { flex: 1; word-break: break-all; }
-.upi-row .copy {
-  background: rgba(255,255,255,.1);
   border: 0;
-  color: #fff;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.status-pill {
-  display: inline-block;
-  padding: 6px 14px;
-  border-radius: 999px;
-  background: rgba(255,138,0,.18);
-  border: 1px solid rgba(255,138,0,.5);
-  color: #ffb74d;
+  border-radius: 14px;
+  padding: 16px 18px;
+  font-size: 16px;
   font-weight: 700;
-  font-size: 12px;
-  letter-spacing: .4px;
-  text-transform: uppercase;
-}
-.status-pill.ok { background: rgba(76,175,80,.18); border-color: rgba(76,175,80,.5); color: #81c784; }
-.status-pill.bad { background: rgba(244,67,54,.18); border-color: rgba(244,67,54,.5); color: #ef9a9a; }
-.token-box {
-  background: #000;
-  color: #ff8a00;
-  padding: 12px 14px;
-  border-radius: 12px;
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-  word-break: break-all;
-  margin: 14px 0;
-  border: 1px solid rgba(255,138,0,.4);
-}
-.muted { opacity: .55; font-size: 12px; }
-a { color: #ff8a00; }
-.small-link {
-  text-align: center;
-  font-size: 12px;
+  letter-spacing: .3px;
+  color: #fff;
+  background: linear-gradient(90deg, #ff007a, #ff8a00);
+  cursor: pointer;
   margin-top: 16px;
-  opacity: .7;
+  transition: transform .08s, opacity .12s;
 }
+.btn-primary:hover { transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+.btn-primary:disabled {
+  opacity: .55; cursor: not-allowed; transform: none;
+}
+.btn-ghost {
+  display: inline-block;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,.18);
+  color: rgba(255,255,255,.85);
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.muted { opacity: .65; font-size: 12px; line-height: 1.5; }
+.spinner {
+  width: 48px; height: 48px;
+  border: 3px solid rgba(255,255,255,.12);
+  border-top-color: #ff007a;
+  border-radius: 50%;
+  margin: 24px auto 18px;
+  animation: spin 0.85s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.success-icon {
+  width: 56px; height: 56px;
+  margin: 8px auto 18px;
+  background: linear-gradient(135deg, #00d97e, #00a96e);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px;
+}
+.center { text-align: center; }
+.err {
+  background: rgba(255,80,80,.12);
+  border: 1px solid rgba(255,80,80,.4);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: #ffb4b4;
+  margin-top: 12px;
+}
+.trust {
+  display: flex; gap: 8px; align-items: center;
+  margin-top: 14px; font-size: 11px; opacity: .55;
+  justify-content: center;
+}
+.dot { width: 6px; height: 6px; border-radius: 50%; background: #00d97e; }
+.hidden { display: none !important; }
+a { color: #ff8aa8; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="brand">◆ Rewire</div>
-  <h1>Premium · Lifetime</h1>
-  <div class="tag">Unlock Intense Mode + leaderboard. One-time payment, lasts forever.</div>
+  <div class="brand">Rewire Premium</div>
+  <h1>Unlock the full library</h1>
+  <p class="sub">Lifetime access. One-time payment. No subscription.</p>
 
-  <div class="price">
-    <b>₹9</b>
-    Pay once · Use forever
-  </div>
+  <!-- ============= STAGE: payment selection (default) ============= -->
+  <div id="stage-select" class="hidden">
+    <div class="card">
+      <h2>What you get</h2>
+      <div class="feat"><span class="check">✓</span><span>Unlimited mood-tuned audio without ads</span></div>
+      <div class="feat"><span class="check">✓</span><span>The complete poster &amp; lyrics archive</span></div>
+      <div class="feat"><span class="check">✓</span><span>Offline / background playback</span></div>
+      <div class="feat"><span class="check">✓</span><span>Pay once, yours forever — no renewals, no upsells</span></div>
+    </div>
 
-  <div class="perks">
-    <ul>
-      <li>Intense Mode — pick 3 of 6 vibes (humour, emotional, sad, controversial, happy, impossible)</li>
-      <li>Movies + endings leaderboard</li>
-      <li>More endings per movie (deeper pool, less repetition)</li>
-      <li>Lifetime token mailed to you · works on any device</li>
-    </ul>
-  </div>
-
-  <!-- Step 1: collect email -->
-  <section id="step-email" class="step active">
-    <div class="field">
-      <label for="email">Your email <span style="color:#ff8a00">*</span></label>
-      <input id="email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required>
-      <div class="note">
-        <strong style="color:#ffb74d">✉ After payment, your lifetime token + receipt will be emailed to this address</strong>
-        from <code>admin@gogillu.live</code>. Also used to recover access if you ever lose it — double-check it before continuing.
+    <div class="card">
+      <h2>Order summary</h2>
+      <div class="price-row">
+        <span class="lbl">Rewire Premium (lifetime)</span>
+        <span class="val">₹9.00</span>
       </div>
-    </div>
-    <div class="field">
-      <label for="phone">Phone <span style="opacity:.55;font-weight:400">(optional · skips a step in payment)</span></label>
-      <input id="phone" type="tel" autocomplete="tel" inputmode="numeric" maxlength="10" placeholder="98xxxxxxxx">
-      <div class="note" style="opacity:.55">Used only to prefill the Razorpay payment sheet. Not stored.</div>
-    </div>
-    <button class="btn" id="goPay">Continue to payment →</button>
-    <div class="small-link">
-      Already paid? <a href="#" id="recoverLink">Recover token</a>
-    </div>
-  </section>
-
-  <!-- Step 2: UPI -->
-  <section id="step-pay" class="step">
-    <div style="text-align:center;margin-bottom:8px"><span class="status-pill">Step 2 of 2 · Pay & unlock</span></div>
-    <p style="font-size:14px;line-height:1.45;margin:8px 0 14px;text-align:center">
-      One-time <b>₹9</b> · lifetime access<br>
-      <span style="font-size:12px;opacity:.55">Order: <span id="orderRef"></span></span>
-    </p>
-
-<!-- v1.7.0: Dodo Payments checkout. PRIMARY in production. Replaces
-     Razorpay (whose merchant activation was denied). On click we POST to
-     /api/buy/dodo-checkout, get a checkout_url, and redirect. After
-     payment Dodo brings the user back to /buy?dodo_order=<localid> and
-     app.js resumes by polling /api/buy/status. -->
-    <button class="btn" id="dodoBtn" style="display:none;font-size:17px;padding:20px;background:linear-gradient(135deg,#3399ff,#0066ff);">
-      ⚡ Pay ₹9 — instant unlock
-    </button>
-    <p class="muted" id="dodoBtnNote" style="display:none;text-align:center;margin-top:6px;font-size:12px;opacity:.7">
-      Secure UPI / card / netbanking · token unlocked + emailed automatically
-    </p>
-
-    <!-- v1.4.4: Test-mode hint. Razorpay account is in review → UPI gated,
-         and even card tile is intermittently rejected ("No appropriate
-         payment method found"). Tell the user up-front to use the green
-         Simulate button below. -->
-    <div id="testModeHint" style="display:none;margin:6px 0 14px;padding:14px 16px;border-radius:14px;background:rgba(16,185,129,.10);border:1px solid rgba(16,185,129,.40);font-size:13.5px;line-height:1.55">
-      <div style="font-weight:700;margin-bottom:6px;color:#34d399">🧪 Test mode — no real money</div>
-      <div style="opacity:.88">
-        Razorpay's UPI is locked while the merchant account is under review,
-        and their card sheet is currently throwing
-        <i>“No appropriate payment method found.”</i>
-        Use the <b>green button below</b> to mint a real lifetime token via
-        the test path — same backend, same email, same unlock flow.
+      <div class="divider"></div>
+      <div class="price-row total">
+        <span class="lbl">Total today</span>
+        <span class="val">₹9.00</span>
       </div>
     </div>
 
-    <!-- v1.4.4: Test-mode simulate button is the PRIMARY CTA when running on
-         a test key. JS in app.js promotes/demotes once /api/version returns
-         the key prefix. Live keys keep the blue button as primary. -->
-    <button class="btn" id="rzpSimulateBtn" style="display:none;font-size:17px;padding:20px;background:linear-gradient(135deg,#10b981,#059669);">
-      🧪 Simulate test payment — instant unlock
-    </button>
-    <p class="muted" id="rzpSimulateNote" style="display:none;text-align:center;margin-top:6px;font-size:12px;opacity:.7">
-      Test-mode shortcut · mints a real lifetime token in your local DB. Email enqueued. No real payment.
-    </p>
+    <div class="card">
+      <label for="email-input">Where should we email your access token?</label>
+      <input id="email-input" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required>
 
-    <!-- v1.4.0: Razorpay checkout. PRIMARY on live keys. In test mode JS
-         demotes this to a small fallback link below the green simulate
-         button, since the merchant account is under review and the sheet
-         currently rejects all methods. -->
-    <button class="btn" id="rzpBtn" style="font-size:17px;padding:20px;background:linear-gradient(135deg,#3399ff,#0066ff);">
-      ⚡ Pay ₹9 — instant unlock
-    </button>
-    <p class="muted" id="rzpBtnNote" style="text-align:center;margin-top:6px;font-size:12px;opacity:.7">
-      Secure UPI payment · token unlocked + emailed automatically
-    </p>
+      <button id="pay-btn" class="btn-primary" type="button">Pay ₹9 →</button>
 
-    <!-- FALLBACK row, only shown when Razorpay isn't configured. The
-         existing direct-deeplink + manual claim flow stays intact for
-         self-host. -->
-    <div id="fallbackPay" style="display:none;margin-top:24px;padding-top:18px;border-top:1px solid rgba(255,255,255,.08)">
-      <p class="muted" style="text-align:center;margin-bottom:10px;font-size:11.5px;letter-spacing:.4px;text-transform:uppercase;opacity:.55">
-        Or pay manually
+      <p class="muted" style="margin-top:14px">
+        You'll be taken to <strong>Dodo Payments</strong>' secure checkout.
+        Pay via <strong>UPI</strong> (GPay / PhonePe / Paytm / Airtel) or
+        card. We auto-detect your payment and unlock Premium —
+        no codes to copy, no manual confirmation steps.
       </p>
-      <a class="btn" id="upiBtn" href="#" target="_blank" rel="noopener" style="font-size:15px;padding:16px;background:rgba(255,255,255,.06);">
-        📱 Pay ₹9 with UPI app
-      </a>
-      <div class="qr" style="margin-top:14px">
-        <img id="qrImg" src="" alt="UPI QR — ₹9 prefilled">
+      <div class="trust">
+        <span class="dot"></span>
+        <span>Payments processed by Dodo Payments · PCI-DSS Level 1</span>
       </div>
-      <button class="btn" id="claimBtn" style="margin-top:10px;background:linear-gradient(135deg,#22c55e,#16a34a);">
-        ✨ I've paid — unlock now
-      </button>
+
+      <div id="select-err" class="err hidden"></div>
     </div>
+  </div>
 
-    <p class="muted" style="margin-top:14px;font-size:11.5px;line-height:1.5;text-align:center;opacity:.55">
-      Powered by Razorpay · disputes: <a href="mailto:admin@gogillu.live" style="color:inherit">admin@gogillu.live</a>
-    </p>
-  </section>
-
-  <!-- Step 4: Pending -->
-  <section id="step-pending" class="step">
-    <div style="text-align:center;margin-bottom:8px"><span class="status-pill">Pending verification</span></div>
-    <p>Thanks 🙏 We've received your transaction reference. Approval is usually <b>within a few hours</b>.</p>
-    <p>Once approved, your <b>lifetime token</b> will:</p>
-    <ul style="font-size:14px;line-height:1.5">
-      <li>arrive in your email from <code>admin@gogillu.live</code></li>
-      <li>auto-unlock Premium on this device when you click the email link</li>
-    </ul>
-    <p class="muted">Order ID: <code id="pendingOrder"></code></p>
-    <p class="muted">Disputes? Reply to the admin email or write to <a href="mailto:admin@gogillu.live">admin@gogillu.live</a>.</p>
-    <button class="btn secondary" id="pollBtn">Check status now</button>
-  </section>
-
-  <!-- Step 5: Done -->
-  <section id="step-done" class="step">
-    <div style="text-align:center;margin-bottom:8px"><span class="status-pill ok">Approved ✓</span></div>
-    <p>You're in! 🎉 Your lifetime token is below — we've also emailed it to you.</p>
-    <div class="token-box" id="tokenBox"></div>
-    <button class="btn" id="goPremium">Open Rewire Premium →</button>
-    <p class="muted">Keep this token safe. Anyone with it can use Premium. Lost it? Use recover-by-email later.</p>
-  </section>
-
-  <!-- Recover -->
-  <section id="step-recover" class="step">
-    <div style="text-align:center;margin-bottom:8px"><span class="status-pill">Recover token</span></div>
-    <div class="field">
-      <label for="recEmail">Email used at purchase</label>
-      <input id="recEmail" type="email" inputmode="email" placeholder="you@example.com">
+  <!-- ============= STAGE: verifying (after return from Dodo) ============= -->
+  <div id="stage-verify" class="hidden">
+    <div class="card center">
+      <div class="spinner"></div>
+      <h2 style="text-transform:none;letter-spacing:0;font-size:20px;margin-top:0">Confirming your payment…</h2>
+      <p class="muted" id="verify-msg" style="margin-top:6px">
+        Dodo is sending us the receipt. This usually takes 2–10 seconds.
+      </p>
+      <p class="muted" id="verify-hint" style="margin-top:18px">
+        Please don't close this tab — you'll be redirected automatically.
+      </p>
+      <div id="verify-err" class="err hidden"></div>
     </div>
-    <div class="field">
-      <label for="recOrder">Order ID</label>
-      <input id="recOrder" type="text" placeholder="from your original confirmation email">
+  </div>
+
+  <!-- ============= STAGE: success (about to redirect) ============= -->
+  <div id="stage-success" class="hidden">
+    <div class="card center">
+      <div class="success-icon">✓</div>
+      <h2 style="text-transform:none;letter-spacing:0;font-size:22px;margin-top:0">Payment received</h2>
+      <p class="muted" style="margin-top:6px">Welcome to Rewire Premium. Redirecting…</p>
     </div>
-    <button class="btn" id="recSubmit">Email me a fresh token</button>
-    <p class="muted">We'll send a new lifetime token to that email and revoke the old one.</p>
-    <div class="small-link"><a href="#" id="backFromRecover">← back</a></div>
-  </section>
+  </div>
+
+  <!-- ============= STAGE: failure / not-confirmed ============= -->
+  <div id="stage-fail" class="hidden">
+    <div class="card">
+      <h2 style="color:#ff8a8a">We couldn't confirm your payment</h2>
+      <p style="font-size:14px">
+        Your bank may not have notified Dodo yet, or the payment was
+        cancelled. If you completed the transaction, your token will be
+        emailed within a few minutes. Check
+        <strong id="fail-email">your inbox</strong> (and spam folder).
+      </p>
+      <p style="font-size:14px;margin-top:14px">Still nothing? Email
+        <a href="mailto:admin@gogillu.live">admin@gogillu.live</a> with
+        your order ID and Dodo transaction id — we'll fix it within a few hours.
+      </p>
+      <p style="font-size:13px;margin-top:14px;opacity:.7">
+        Order ID: <code id="fail-order">—</code>
+      </p>
+      <button id="fail-retry" class="btn-primary" type="button" style="margin-top:18px">Try again</button>
+    </div>
+  </div>
+
+  <p class="muted" style="margin-top:24px;text-align:center">
+    <a href="/">← back to Rewire</a>
+  </p>
 </div>
-<script src="/buy/app.js?v=1.7.1"></script>
+
+<script src="/buy/app.js?v=1.8.1"></script>
 </body>
 </html>
-
-
-

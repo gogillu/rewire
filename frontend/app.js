@@ -4,8 +4,124 @@
 // v1.3.0: bigger Instagram-style stats badge, "+" FAB community entry,
 // full-modal premium sales-pitch (with bullet benefits), prominent UPI
 // deeplink CTA on /buy (avoids PhonePe gallery-QR security limits).
-window.REWIRE_VERSION = '1.5.1';
+// v1.7.0: auto-redirect premium users to /premium on root load.
+// v1.8.0: direct UPI replaces Dodo Payments. Abandonment nudge banner
+//         shown when the user started /buy but never claimed the token.
+window.REWIRE_VERSION = '1.8.1';
 console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
+
+// v1.7.0 — Premium auto-redirect. Runs BEFORE the IIFE so it can short-
+// circuit the boot. If the browser has a premium token in localStorage,
+// redirect to /premium immediately. Two escape hatches so users can still
+// see the free landing page:
+//   * ?stay=1                 — one-off override on the URL
+//   * localStorage.rw_stay=1  — sticky override per browser
+// The /premium page itself token-gates with /api/premium/verify, so a
+// revoked token will just land on the token-gate UI instead of an
+// infinite redirect loop. We ALSO check the URL is "/" (or empty) so a
+// premium user can navigate to other pages like /buy without bouncing.
+(function premiumAutoRedirect() {
+  try {
+    var path = location.pathname.replace(/\/+$/, '') || '/';
+    if (path !== '' && path !== '/' && path !== '/index.html') return;
+    var qs = location.search || '';
+    if (qs.indexOf('stay=1') !== -1) return;
+    if (localStorage.getItem('rw_stay') === '1') return;
+    if (!localStorage.getItem('rw_premium_token')) return;
+    // Use replace() so the back button doesn't trap users in a redirect loop.
+    location.replace('/premium' + qs);
+  } catch (e) { /* localStorage disabled — fall through to free experience */ }
+})();
+
+// v1.8.0 — Abandonment nudge. If the user started checkout at /buy but
+// never finished (no rw_premium_token set, while rw_buy_pending_nudge is
+// fresh), pop a sticky banner at the top of the free page with a "Continue
+// payment →" CTA. Tied to the order's actual expiry (24 h) so we never
+// deep-link to an expired order_id. Per-day dismiss via rw_buy_nudge_off.
+(function paymentAbandonmentNudge() {
+  try {
+    // Strong condition first — if user is premium, scrub the nudge state.
+    if (localStorage.getItem('rw_premium_token')) {
+      localStorage.removeItem('rw_buy_pending_nudge');
+      return;
+    }
+    var raw = localStorage.getItem('rw_buy_pending_nudge');
+    if (!raw) return;
+    var nudge; try { nudge = JSON.parse(raw); } catch { return; }
+    if (!nudge || !nudge.order_id || !nudge.expires_at) {
+      localStorage.removeItem('rw_buy_pending_nudge');
+      return;
+    }
+    if (Date.now() > nudge.expires_at) {
+      localStorage.removeItem('rw_buy_pending_nudge');
+      return;
+    }
+    // 24-h dismiss flag.
+    var off = parseInt(localStorage.getItem('rw_buy_nudge_off') || '0', 10);
+    if (off && Date.now() < off) return;
+    // Don't show on /buy itself — they're already there.
+    var path = location.pathname.replace(/\/+$/, '') || '/';
+    if (path === '/buy' || path.indexOf('/buy/') === 0) return;
+
+    function inject() {
+      if (document.getElementById('rwNudge')) return;
+      var bar = document.createElement('div');
+      bar.id = 'rwNudge';
+      bar.setAttribute('role', 'status');
+      bar.style.cssText = [
+        'position:fixed',
+        'top:0','left:0','right:0',
+        'z-index:9999',
+        'padding:10px 14px 10px 14px',
+        'background:linear-gradient(90deg,rgba(255,138,0,.92),rgba(255,0,122,.92) 60%,rgba(142,45,226,.92))',
+        'color:#fff',
+        'font:600 13px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',
+        'display:flex','align-items:center','gap:10px',
+        'box-shadow:0 6px 18px rgba(0,0,0,.35)',
+        'cursor:pointer',
+        'backdrop-filter:saturate(140%) blur(4px)'
+      ].join(';');
+      bar.innerHTML =
+        '<span style="font-size:18px;line-height:1">✨</span>' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font-weight:800;letter-spacing:.2px">You were almost there to enjoy the premium experience</div>' +
+          '<div style="opacity:.92;font-weight:500;margin-top:1px;font-size:12px">Finish your ₹9 UPI payment — lifetime access waiting.</div>' +
+        '</div>' +
+        '<button type="button" id="rwNudgeGo" style="background:#fff;color:#7b1fa2;border:0;border-radius:999px;padding:8px 14px;font-weight:800;font-size:12.5px;cursor:pointer;letter-spacing:.3px">Continue →</button>' +
+        '<button type="button" id="rwNudgeX" aria-label="Dismiss" style="background:transparent;border:0;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:4px 6px;opacity:.85">×</button>';
+      document.body.appendChild(bar);
+      // Push the page down so the banner doesn't cover fixed top headers.
+      var h = bar.getBoundingClientRect().height;
+      document.body.style.paddingTop = (parseFloat(getComputedStyle(document.body).paddingTop) || 0) + h + 'px';
+
+      function go(ev) {
+        if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+        try {
+          if (window.REWIRE_TRACK) window.REWIRE_TRACK('nudge_continue_click');
+        } catch {}
+        location.href = '/buy';
+      }
+      function dismiss(ev) {
+        if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+        try {
+          localStorage.setItem('rw_buy_nudge_off', String(Date.now() + 24*60*60*1000));
+          if (window.REWIRE_TRACK) window.REWIRE_TRACK('nudge_dismiss');
+        } catch {}
+        bar.remove();
+        document.body.style.paddingTop = '';
+      }
+      bar.querySelector('#rwNudgeGo').addEventListener('click', go);
+      bar.querySelector('#rwNudgeX').addEventListener('click', dismiss);
+      bar.addEventListener('click', go); // tapping the banner body also goes to /buy
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', inject, { once: true });
+    } else {
+      inject();
+    }
+  } catch (e) { /* swallow */ }
+})();
+
 (function () {
   'use strict';
 
@@ -82,6 +198,10 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
     communityMovie: null,                  // currently-open movie in sheet
     communityLikes: new Set(),             // ending_ids the user has liked
     communityRatings: new Map(),           // ending_id -> 1..5
+    // v1.6.2 — premium status (verified server-side, optimistic from
+    // localStorage on first paint).
+    isPremium: !!localStorage.getItem('rw_premium_token'),
+    premiumEmail: '',
   };
 
   // ---------- Telemetry ----------
@@ -356,10 +476,28 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
 
     card.appendChild(wrap);
 
-    // VERY BOTTOM — Rewire brand chip
+    // VERY BOTTOM — Rewire brand chip + tier pill (v1.6.2)
     const brand = document.createElement('div');
     brand.className = 'brand';
-    brand.innerHTML = `<div class="logo">Rewire</div>`;
+    brand.innerHTML = `
+      <div class="logo">Rewire</div>
+      <div class="tier ${state.isPremium ? 'premium' : 'free'}"
+           data-role="tier-pill"
+           title="${state.isPremium ? 'Premium' + (state.premiumEmail ? ' · ' + state.premiumEmail : '') : 'Free tier — tap to unlock Premium'}">
+        ${state.isPremium ? 'Premium' : 'Free'}
+      </div>
+    `;
+    brand.querySelector('[data-role="tier-pill"]').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (state.isPremium) {
+        track('tier_pill_premium_tap');
+        window.location.href = '/premium';
+      } else {
+        track('tier_pill_free_tap');
+        window.location.href = '/buy';
+      }
+    });
     card.appendChild(brand);
 
     // Flag button (top-right of card, just left of audio toggle).
@@ -521,8 +659,10 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
   // ---------- Splash ----------
   function dismissSplash() {
     const sp = $('#splash');
-    sp.classList.add('gone');
-    setTimeout(() => sp.remove(), 600);
+    if (sp) {
+      sp.classList.add('gone');
+      setTimeout(() => { try { sp.remove(); } catch (_) {} }, 600);
+    }
     setAudio(true);
     const m = state.movies[state.activeIdx >= 0 ? state.activeIdx : 0];
     if (m && m.has_audio) playAudio(m.id, m.audio_version);
@@ -852,6 +992,63 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
     localStorage.setItem('rw_crates', JSON.stringify(o));
   }
 
+  // ---------- Premium tier (v1.6.2) ----------
+  // The brand chip on every card shows a Premium / Free pill. We verify
+  // the token server-side once on boot so a revoked / expired token
+  // immediately demotes the UI to "Free" instead of lying with a stale
+  // localStorage flag.
+  async function verifyPremium() {
+    const tok = localStorage.getItem('rw_premium_token') || '';
+    if (!tok) {
+      state.isPremium = false;
+      state.premiumEmail = '';
+      refreshTierPills();
+      return;
+    }
+    try {
+      const r = await fetch('/api/premium/verify?token=' + encodeURIComponent(tok),
+        { cache: 'no-store' });
+      if (!r.ok) {
+        state.isPremium = false;
+        state.premiumEmail = '';
+        // Don't delete the token automatically — could be a transient
+        // network error. Just demote the pill.
+      } else {
+        const j = await r.json();
+        state.isPremium = !!j.ok;
+        state.premiumEmail = j.email || '';
+        // v1.7.0: if the token was confirmed valid AND we're on the root
+        // landing (the user hasn't explicitly clicked /buy etc), auto-
+        // redirect to the premium experience. This catches the case where
+        // the token was written from another tab (post-payment email
+        // link) and the user reloads the free page.
+        if (state.isPremium) {
+          const path = location.pathname.replace(/\/+$/, '') || '/';
+          const qs = location.search || '';
+          const stay = qs.indexOf('stay=1') !== -1 || localStorage.getItem('rw_stay') === '1';
+          if (!stay && (path === '' || path === '/' || path === '/index.html')) {
+            location.replace('/premium' + qs);
+            return;
+          }
+        }
+      }
+    } catch (_) {
+      // Offline: keep optimistic value from localStorage.
+      state.isPremium = !!tok;
+    }
+    refreshTierPills();
+  }
+  function refreshTierPills() {
+    document.querySelectorAll('.brand .tier').forEach(el => {
+      el.classList.toggle('premium', state.isPremium);
+      el.classList.toggle('free', !state.isPremium);
+      el.textContent = state.isPremium ? 'Premium' : 'Free';
+      el.title = state.isPremium
+        ? 'Premium' + (state.premiumEmail ? ' · ' + state.premiumEmail : '')
+        : 'Free tier — tap to unlock Premium';
+    });
+  }
+
   // ---------- Premium nudge ----------
   // v1.3: full-modal sales pitch (instead of v1.2 corner banner that
   // covered the bottom ending). Shown after 8 cards first time, then
@@ -905,15 +1102,30 @@ console.log('[Rewire] frontend v' + window.REWIRE_VERSION);
   }
 
   // ---------- Boot ----------
-  // v1.5: brain rewire intro — runs once per session before splash.
-  if (window.RewireIntro) { window.RewireIntro.show().catch(() => {}); }
-  $('#splash').addEventListener('click', dismissSplash, { once: true });
+  // v1.6.2 — looping brain animation IS the splash now. The user must
+  // tap the glowy CTA to dismiss; the old static #splash markup is
+  // hidden when the loop overlay is mounted (handled below) so the
+  // app boots in the background while the animation plays.
+  (function setupSplash() {
+    const splash = $('#splash');
+    if (window.RewireIntro && typeof window.RewireIntro.loop === 'function') {
+      // Hide the legacy static splash so it doesn't double up.
+      if (splash) splash.style.display = 'none';
+      window.RewireIntro.loop({ ctaLabel: 'Tap to begin' })
+        .then(() => dismissSplash())
+        .catch(() => dismissSplash());
+    } else if (splash) {
+      // Fallback: original static splash, click-to-dismiss.
+      splash.addEventListener('click', dismissSplash, { once: true });
+    }
+  })();
   $('#audioBtn').addEventListener('click', () => setAudio(!state.audioOn));
   setupFeedback();
   setupFlag();
   setupPremiumNudge();
   setupCommunity();
   loadFlags();
+  verifyPremium(); // v1.6.2 — confirm token is still valid, refresh pills
 
   (async function boot() {
     try {
