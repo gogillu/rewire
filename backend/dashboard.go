@@ -117,6 +117,36 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
         GROUP BY 1 ORDER BY users DESC LIMIT 20
     `, args...)
 
+	// Per-location geo aggregation for the map heatmap. Joins each
+	// telemetry event with its ip_geo row (resolved via ip-api.com in
+	// telemetry.go's resolveBatch). Rounds lat/lon to 3 dp (~110 m) so
+	// multiple IPs that ip-api maps to the same city centroid collapse
+	// into one heatmap point. Excludes rows where lat/lon were never
+	// resolved or are (0,0) sentinel. We use MAX() over the dimension
+	// columns purely for determinism — within a rounded (lat,lon) bucket
+	// they're almost always identical anyway.
+	out["geo_points"] = queryRowsArgs(s.db, `
+        SELECT
+            ROUND(g.lat, 3) AS lat,
+            ROUND(g.lon, 3) AS lon,
+            MAX(g.city)     AS city,
+            MAX(g.region)   AS region,
+            MAX(g.country)  AS country,
+            MAX(g.isp)      AS isp,
+            COUNT(DISTINCT te.anon_id) AS users,
+            COUNT(*)        AS events,
+            MAX(te.ts)      AS last_seen
+        FROM telemetry_events te
+        JOIN ip_geo g ON g.ip = te.ip
+        WHERE g.lat IS NOT NULL AND g.lon IS NOT NULL
+          AND (g.lat != 0 OR g.lon != 0)
+          AND te.ip IS NOT NULL AND te.ip != ''
+          `+modeFilter+`
+        GROUP BY 1, 2
+        ORDER BY users DESC
+        LIMIT 500
+    `, args...)
+
 	out["devices"] = queryRowsArgs(s.db, `
         SELECT
             COALESCE(NULLIF(device,''),'unknown')  AS device,
@@ -299,10 +329,13 @@ func init() {
 
 // ---------- inline dashboard HTML ----------
 //
-// Plain HTML + vanilla JS, ~12 KB. Renders summary cards, top-movies table,
-// ending leaderboard, country list, device breakdown, recent feedback,
-// and an SVG hourly-traffic sparkline. No external assets so the page works
-// even when offline.
+// Vanilla JS, ~18 KB. Renders summary cards, top-movies table, ending
+// leaderboard, country list, device breakdown, recent feedback, an SVG
+// hourly-traffic sparkline, and a per-location Leaflet heatmap + hover
+// markers (v1.8.4). The only external assets are Leaflet 1.9.4 +
+// leaflet.heat 0.2.0 from unpkg, and the CartoDB Dark Matter tile
+// service for the map background — pinned to specific versions to keep
+// the page stable.
 
 const dashboardHTML = `<!doctype html>
 <html lang="en">
@@ -310,6 +343,7 @@ const dashboardHTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Rewire — Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 <style>
 :root{color-scheme:dark;--bg:#0a0a0c;--card:#15151a;--muted:#8a8a96;--fg:#fff;--accent:#ff007a;}
 *{box-sizing:border-box}
@@ -366,6 +400,19 @@ small{font-size:11px;color:var(--muted)}
 .pending-actions button.approve{background:linear-gradient(90deg,#16a34a,#22c55e);border-color:transparent;font-weight:700}
 .pending-actions button.reject{background:#3a1a1a;color:#ff8a8a;border-color:#5a1a1a}
 .pending-actions button:disabled{opacity:.5;cursor:wait}
+#map{height:440px;background:#0c1014;border:1px solid #232328;border-radius:14px;overflow:hidden;position:relative}
+#map .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;letter-spacing:.5px;pointer-events:none}
+.leaflet-container{background:#0c1014}
+.leaflet-control-attribution{background:rgba(20,20,26,.7) !important;color:#888 !important;font-size:10px !important}
+.leaflet-control-attribution a{color:#aaa !important}
+.leaflet-tooltip{background:#15151a;border:1px solid #2a2a30;color:#fff;font-size:12px;line-height:1.45;padding:8px 11px;border-radius:8px;box-shadow:0 6px 22px #000c;white-space:normal;max-width:240px}
+.leaflet-tooltip:before{display:none}
+.map-tip-loc{font-weight:700;letter-spacing:.3px}
+.map-tip-meta{color:#8a8a96;font-size:11px;margin-top:2px}
+.map-tip-stats{margin-top:6px;font-variant-numeric:tabular-nums}
+.map-tip-stats strong{color:#ff8a00}
+.map-legend{position:absolute;right:10px;bottom:10px;background:#15151a;border:1px solid #2a2a30;border-radius:8px;padding:8px 10px;font-size:11px;color:var(--muted);z-index:500;letter-spacing:.4px}
+.map-legend .swatch{display:inline-block;width:14px;height:8px;border-radius:2px;vertical-align:middle;margin-right:4px}
 </style>
 </head>
 <body>
@@ -425,6 +472,15 @@ small{font-size:11px;color:var(--muted)}
     </div>
   </div>
 
+  <h2>User heatmap <span class="muted" style="font-size:11px;letter-spacing:1px">(hover any pin for details)</span></h2>
+  <div id="map">
+    <div class="empty" id="mapEmpty">No geolocated traffic yet — waiting for ip-api.com to resolve recent visitors.</div>
+    <div class="map-legend" id="mapLegend" style="display:none">
+      <div><span class="swatch" style="background:linear-gradient(90deg,#3b0070,#ff007a,#ff8a00,#fff)"></span>density</div>
+      <div style="margin-top:4px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff007a;vertical-align:middle;margin-right:4px"></span>pin = location</div>
+    </div>
+  </div>
+
   <h2>Recent users</h2>
   <table id="users"></table>
 
@@ -442,6 +498,8 @@ small{font-size:11px;color:var(--muted)}
   <p class="muted" style="margin-top:30px"><small>Updated <span id="updated">—</span>. Token cleared by deleting the rewire_admin cookie.</small></p>
 </div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" crossorigin=""></script>
 <script>
 const $ = s => document.querySelector(s);
 let currentMode = 'all';
@@ -470,6 +528,78 @@ function tbl(el, headers, rows){
   el.innerHTML = '<thead><tr>'+headers.map(h=>'<th>'+htmlescape(h)+'</th>').join('')+'</tr></thead><tbody>'+
     rows.map(r=>'<tr>'+r.map((c,i)=>'<td'+(typeof c==='number'?' class="num"':'')+'>'+(c==null?'—':c)+'</td>').join('')+'</tr>').join('')+
     '</tbody>';
+}
+
+// Map state held across reloads so we don't reinstantiate Leaflet every
+// 30 s — that would re-fetch tiles and flicker the view.
+let _map=null, _heatLayer=null, _markers=null;
+function renderHeatmap(points){
+  const empty = document.getElementById('mapEmpty');
+  const legend = document.getElementById('mapLegend');
+  if (typeof L === 'undefined') {
+    if (empty) empty.textContent = 'Leaflet failed to load (offline?). Heatmap disabled.';
+    return;
+  }
+  if (!_map) {
+    _map = L.map('map', {
+      worldCopyJump: true,
+      preferCanvas: true,
+      attributionControl: true,
+      zoomControl: true,
+    }).setView([20, 20], 2);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap &copy; CARTO',
+      subdomains: 'abcd',
+      maxZoom: 18,
+    }).addTo(_map);
+    _markers = L.layerGroup().addTo(_map);
+  }
+  // Clear previous layers.
+  if (_heatLayer) { _map.removeLayer(_heatLayer); _heatLayer = null; }
+  _markers.clearLayers();
+
+  if (!points.length) {
+    if (empty) { empty.style.display='flex'; empty.textContent = 'No geolocated traffic yet — waiting for ip-api.com to resolve recent visitors.'; }
+    if (legend) legend.style.display = 'none';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  if (legend) legend.style.display = 'block';
+
+  const maxUsers = Math.max(1, ...points.map(p => +p.users || 0));
+  // Heatmap layer — intensity scaled by user count, normalised to [0.05..1].
+  if (L.heatLayer) {
+    const heatData = points.map(p => {
+      const w = Math.max(0.05, ((+p.users) || 1) / maxUsers);
+      return [ +p.lat, +p.lon, w ];
+    });
+    _heatLayer = L.heatLayer(heatData, {
+      radius: 30,
+      blur: 24,
+      maxZoom: 9,
+      minOpacity: 0.35,
+      gradient: { 0.1:'#3b0070', 0.35:'#8e2de2', 0.6:'#ff007a', 0.8:'#ff8a00', 1.0:'#ffffff' },
+    }).addTo(_map);
+  }
+  // One circle marker per location for hover detail.
+  points.forEach(p => {
+    const u = +p.users || 0;
+    const r = 4 + Math.sqrt(u / Math.max(1, maxUsers)) * 14;
+    const m = L.circleMarker([+p.lat, +p.lon], {
+      radius: r, color: '#ff007a', weight: 1,
+      fillColor: '#ff007a', fillOpacity: 0.55,
+    });
+    const loc = [p.city, p.region, p.country].filter(Boolean).join(', ') || 'Unknown location';
+    const tip =
+      '<div class="map-tip-loc">'+htmlescape(loc)+'</div>'+
+      (p.isp ? '<div class="map-tip-meta">'+htmlescape(p.isp)+'</div>' : '')+
+      '<div class="map-tip-stats"><strong>'+fmt(u)+'</strong> user'+(u===1?'':'s')+
+        ' · <strong>'+fmt(p.events)+'</strong> event'+((+p.events)===1?'':'s')+'</div>'+
+      '<div class="map-tip-meta">last seen '+timeAgo(p.last_seen)+' ago · '+
+        (+p.lat).toFixed(3)+', '+(+p.lon).toFixed(3)+'</div>';
+    m.bindTooltip(tip, { sticky: true, direction: 'top', opacity: 1 });
+    m.addTo(_markers);
+  });
 }
 
 async function load(){
@@ -556,6 +686,10 @@ async function load(){
       fmt(c.users), fmt(c.events),
       '<span class="bar" style="width:'+((+c.users||0)*120/cmax)+'px"></span>'
     ]));
+
+  // Geo heatmap. Builds the Leaflet map lazily on first paint, then
+  // refreshes the heat layer + circle markers on every poll.
+  renderHeatmap(j.geo_points||[]);
 
   // Devices.
   tbl($('#devices'),
