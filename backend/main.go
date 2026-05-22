@@ -263,8 +263,20 @@ func main() {
 	mux.Handle("GET /audio/", srv.audioHandler())
 	mux.Handle("/", srv.staticHandler())
 
+	// Guard - per-IP rate-limit + sliding-window ban shield.
+	// See guard.go. All public traffic to rewire flows through it.
+	guardCtx, guardCancel := context.WithCancel(context.Background())
+	defer guardCancel()
+	guard := newRewireGuard(guardCtx)
+	// Admin kill-switches (Bearer = REWIRE_ADMIN_TOKEN, NOT user tokens).
+	mux.HandleFunc("GET /api/admin/guard/stats", guard.handleStats)
+	mux.HandleFunc("POST /api/admin/guard/disable", guard.handleDisable)
+	mux.HandleFunc("POST /api/admin/guard/enable", guard.handleEnable)
+	mux.HandleFunc("POST /api/admin/guard/unban", guard.handleUnban)
+	mux.HandleFunc("POST /api/admin/guard/clear", guard.handleClear)
+
 	// Wrap with permissive CORS so the frontend can be embedded anywhere.
-	handler := withCORS(mux)
+	handler := guard.Middleware(withCORS(mux))
 
 	addr := fmt.Sprintf("0.0.0.0:%d", *port)
 	httpSrv := &http.Server{
