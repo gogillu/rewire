@@ -56,11 +56,11 @@ type rewireGuardConfig struct {
 
 func loadRewireGuardConfig() rewireGuardConfig {
 	cfg := rewireGuardConfig{
-		RPSRefill:      atoiEnvOr("REWIRE_GUARD_RPS_REFILL", 60),
-		RPSBurst:       atoiEnvOr("REWIRE_GUARD_RPS_BURST", 120),
+		RPSRefill:      atoiEnvOr("REWIRE_GUARD_RPS_REFILL", 10),
+		RPSBurst:       atoiEnvOr("REWIRE_GUARD_RPS_BURST", 30),
 		LoginRPSRefill: atoiEnvOr("REWIRE_GUARD_LOGIN_REFILL", 1),
 		LoginRPSBurst:  atoiEnvOr("REWIRE_GUARD_LOGIN_BURST", 5),
-		BanThreshold:   atoiEnvOr("REWIRE_GUARD_BAN_THRESHOLD", 30),
+		BanThreshold:   atoiEnvOr("REWIRE_GUARD_BAN_THRESHOLD", 5),
 		BanWindow:      time.Duration(atoiEnvOr("REWIRE_GUARD_BAN_WINDOW_SEC", 60)) * time.Second,
 		BanDuration:    time.Duration(atoiEnvOr("REWIRE_GUARD_BAN_DURATION_SEC", 900)) * time.Second,
 		IncidentURL:    strings.TrimSpace(os.Getenv("GOD_BACKEND_INCIDENT_URL")),
@@ -299,7 +299,15 @@ func (g *rewireGuard) take(tab map[string]*bucket, ip string, burst, refill int)
 	return false
 }
 
-func (g *rewireGuard) recordHit(ip string) (banned bool, until time.Time) {
+// recordNaughtyHit appends a "throttle/login-throttle/auth-fail" event to
+// the per-IP sliding window. ONLY suspicious events feed this — normal,
+// successful traffic does not. This mirrors god's frontend_guard.go ban
+// semantics: a token-bucket exhaustion or an auth-shaped 401/403 counts
+// as a "naughty hit", and an IP that produces >BanThreshold of these in
+// BanWindow gets a BanDuration ban.
+//
+// Returns (banned, until). Caller already holds g.mu.
+func (g *rewireGuard) recordNaughtyHit(ip string) (banned bool, until time.Time) {
 	b := g.all[ip]
 	if b == nil {
 		b = &bucket{}
@@ -317,7 +325,7 @@ func (g *rewireGuard) recordHit(ip string) (banned bool, until time.Time) {
 		}
 	}
 	b.hits = append(keep, now)
-	if len(b.hits) > g.cfg.BanThreshold {
+	if len(b.hits) >= g.cfg.BanThreshold {
 		b.banUntil = now.Add(g.cfg.BanDuration)
 		b.hits = nil
 		return true, b.banUntil
@@ -351,11 +359,43 @@ func (g *rewireGuard) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		g.mu.Lock()
+		// First: if this IP is already banned, kick immediately and
+		// record nothing further (don't let the ban window grow under
+		// sustained pressure - the ban already covers the window).
+		if b := g.all[ip]; b != nil && !b.banUntil.IsZero() && time.Now().Before(b.banUntil) {
+			until := b.banUntil
+			g.mu.Unlock()
+			g.banned.Add(1)
+			retry := int(time.Until(until).Seconds()) + 1
+			if retry < 1 {
+				retry = 60
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(retry))
+			http.Error(w, fmt.Sprintf("banned for %ds", retry), http.StatusTooManyRequests)
+			return
+		}
 		// Login bucket (tighter) on auth-shaped endpoints.
-		if g.isLoginPath(r.URL.Path) {
+		isLogin := g.isLoginPath(r.URL.Path)
+		if isLogin {
 			if !g.take(g.login, ip, g.cfg.LoginRPSBurst, g.cfg.LoginRPSRefill) {
+				// Login bucket exhaustion counts as a naughty hit.
+				banned, until := g.recordNaughtyHit(ip)
 				g.mu.Unlock()
 				g.dropped.Add(1)
+				if banned {
+					g.banned.Add(1)
+					retry := int(time.Until(until).Seconds()) + 1
+					if retry < 1 {
+						retry = 60
+					}
+					w.Header().Set("Retry-After", strconv.Itoa(retry))
+					g.emit("ban", ip, r.UserAgent(), r.URL.Path, r.Method,
+						"login_bucket_repeated",
+						fmt.Sprintf("ban_until=%s (triggered by login throttle)", until.UTC().Format(time.RFC3339)),
+						"alert", http.StatusTooManyRequests)
+					http.Error(w, fmt.Sprintf("banned for %ds", retry), http.StatusTooManyRequests)
+					return
+				}
 				g.emit("login_throttle", ip, r.UserAgent(), r.URL.Path, r.Method,
 					"rate_exceeded", "login bucket exhausted", "alert", http.StatusTooManyRequests)
 				w.Header().Set("Retry-After", "30")
@@ -363,34 +403,91 @@ func (g *rewireGuard) Middleware(next http.Handler) http.Handler {
 				return
 			}
 		}
-		// Main bucket.
-		ok := g.take(g.all, ip, g.cfg.RPSBurst, g.cfg.RPSRefill)
-		banned, until := g.recordHit(ip)
-		g.mu.Unlock()
-		if banned {
-			g.banned.Add(1)
-			retry := int(time.Until(until).Seconds()) + 1
-			if retry < 1 {
-				retry = 60
-			}
-			w.Header().Set("Retry-After", strconv.Itoa(retry))
-			g.emit("ban", ip, r.UserAgent(), r.URL.Path, r.Method,
-				"sliding_window_threshold", fmt.Sprintf("ban_until=%s", until.UTC().Format(time.RFC3339)),
-				"alert", http.StatusTooManyRequests)
-			http.Error(w, fmt.Sprintf("banned for %ds", retry), http.StatusTooManyRequests)
-			return
-		}
-		if !ok {
+		// Main token bucket. Bucket exhaustion -> naughty hit.
+		if !g.take(g.all, ip, g.cfg.RPSBurst, g.cfg.RPSRefill) {
+			banned, until := g.recordNaughtyHit(ip)
+			g.mu.Unlock()
 			g.dropped.Add(1)
+			if banned {
+				g.banned.Add(1)
+				retry := int(time.Until(until).Seconds()) + 1
+				if retry < 1 {
+					retry = 60
+				}
+				w.Header().Set("Retry-After", strconv.Itoa(retry))
+				g.emit("ban", ip, r.UserAgent(), r.URL.Path, r.Method,
+					"main_bucket_repeated",
+					fmt.Sprintf("ban_until=%s (triggered by main throttle)", until.UTC().Format(time.RFC3339)),
+					"alert", http.StatusTooManyRequests)
+				http.Error(w, fmt.Sprintf("banned for %ds", retry), http.StatusTooManyRequests)
+				return
+			}
 			g.emit("throttle", ip, r.UserAgent(), r.URL.Path, r.Method,
 				"rate_exceeded", "main bucket exhausted", "warn", http.StatusTooManyRequests)
 			w.Header().Set("Retry-After", "5")
 			http.Error(w, "rate limit", http.StatusTooManyRequests)
 			return
 		}
+		g.mu.Unlock()
 		g.allowed.Add(1)
+		// On login/admin paths, also count an upstream 401/403 as a
+		// naughty hit (brute-force-shaped failure). Wrap the response
+		// writer to observe the status without buffering the body.
+		if isLogin {
+			ww := &rewireStatusWriter{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(ww, r)
+			if ww.status == http.StatusUnauthorized || ww.status == http.StatusForbidden {
+				g.mu.Lock()
+				banned, until := g.recordNaughtyHit(ip)
+				g.mu.Unlock()
+				if banned {
+					g.banned.Add(1)
+					g.emit("ban", ip, r.UserAgent(), r.URL.Path, r.Method,
+						"auth_fail_repeated",
+						fmt.Sprintf("ban_until=%s (triggered by repeated %d)", until.UTC().Format(time.RFC3339), ww.status),
+						"alert", http.StatusForbidden)
+				} else {
+					g.emit("auth_fail", ip, r.UserAgent(), r.URL.Path, r.Method,
+						fmt.Sprintf("upstream_%d", ww.status),
+						"upstream returned auth failure", "warn", ww.status)
+				}
+			}
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// rewireStatusWriter captures status code without buffering body so we can
+// classify auth failures from downstream handlers.
+type rewireStatusWriter struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (w *rewireStatusWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		w.status = code
+		w.wroteHeader = true
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *rewireStatusWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.status = http.StatusOK
+		w.wroteHeader = true
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// Flush proxies the underlying ResponseWriter's Flush so streaming endpoints
+// (audio, SSE) still work through the middleware.
+func (w *rewireStatusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (g *rewireGuard) handleStats(w http.ResponseWriter, r *http.Request) {
